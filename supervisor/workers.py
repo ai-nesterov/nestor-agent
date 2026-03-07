@@ -540,18 +540,15 @@ def kill_workers(force: bool = False) -> None:
 
 
 def _kill_survivors() -> None:
-    """SIGKILL any workers still alive after SIGTERM."""
-    import signal
+    """Force-kill any workers still alive after graceful termination."""
+    from ouroboros.compat import force_kill_pid
     for w in WORKERS.values():
         if not w.proc.is_alive():
             continue
         pid = w.proc.pid
         if pid is None:
             continue
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+        force_kill_pid(pid)
         w.proc.join(timeout=2)
 
 

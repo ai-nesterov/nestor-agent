@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Ouroboros.app (macOS).
+"""PyInstaller spec for Ouroboros (macOS, Linux, Windows).
 
 Bundles launcher.py as the entry point. The agent code (server.py, ouroboros/,
 supervisor/, web/) is included as data and copied to ~/Ouroboros/repo/ on first run.
@@ -10,6 +10,22 @@ import os
 import sys
 
 block_cipher = None
+
+# ---------------------------------------------------------------------------
+# Platform-specific settings
+# ---------------------------------------------------------------------------
+_is_macos = sys.platform == "darwin"
+_is_windows = sys.platform == "win32"
+
+if _is_windows:
+    _icon = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
+    _console = False
+elif _is_macos:
+    _icon = 'assets/icon.icns'
+    _console = False
+else:
+    _icon = None
+    _console = False
 
 a = Analysis(
     ['launcher.py'],
@@ -59,8 +75,9 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    console=_console,
     disable_windowed_traceback=False,
+    icon=_icon,
 )
 
 coll = COLLECT(
@@ -74,15 +91,17 @@ coll = COLLECT(
     name='Ouroboros',
 )
 
-app = BUNDLE(
-    coll,
-    name='Ouroboros.app',
-    icon='assets/icon.icns',
-    bundle_identifier='com.ouroboros.agent',
-    info_plist={
-        'CFBundleShortVersionString': open('VERSION').read().strip(),
-        'CFBundleVersion': open('VERSION').read().strip(),
-        'NSHighResolutionCapable': True,
-        'LSMinimumSystemVersion': '12.0',
-    },
-)
+# macOS application bundle (skipped on Linux/Windows)
+if _is_macos:
+    app = BUNDLE(
+        coll,
+        name='Ouroboros.app',
+        icon='assets/icon.icns',
+        bundle_identifier='com.ouroboros.agent',
+        info_plist={
+            'CFBundleShortVersionString': open('VERSION').read().strip(),
+            'CFBundleVersion': open('VERSION').read().strip(),
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '12.0',
+        },
+    )
