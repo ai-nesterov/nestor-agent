@@ -12,15 +12,47 @@ become progressively more compressed while recent events keep full detail.
 Triggered after each task completion via daemon threads.
 """
 
-import fcntl
 import json
 import logging
 import os
 import pathlib
 import re
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from ouroboros.utils import utc_now_iso, read_text, write_text
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_nb(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+
+    def _lock_ex(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    def _lock_sh(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    def _unlock(fd: int) -> None:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    import fcntl
+
+    def _lock_nb(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _lock_ex(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _lock_sh(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+
+    def _unlock(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +112,7 @@ def consolidate(
     try:
         lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o644)
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_nb(lock_fd)
         except (OSError, BlockingIOError):
             log.info("Chat block consolidation already running, skipping")
             return None
@@ -98,7 +130,7 @@ def consolidate(
     finally:
         if lock_fd is not None:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _unlock(lock_fd)
                 os.close(lock_fd)
             except OSError:
                 pass
@@ -420,19 +452,19 @@ def _load_blocks(path: pathlib.Path) -> List[Dict[str, Any]]:
 
 
 def _save_blocks(path: pathlib.Path, blocks: List[Dict[str, Any]]) -> None:
-    """Write JSON block list to file with fcntl file lock."""
+    """Write JSON block list to file with cross-platform file lock."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = None
     try:
         fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        _lock_ex(fd)
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
         os.write(fd, json.dumps(blocks, ensure_ascii=False, indent=2).encode("utf-8"))
     finally:
         if fd is not None:
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                _unlock(fd)
                 os.close(fd)
             except OSError:
                 pass
@@ -641,14 +673,14 @@ Respond with JSON only (no fences):
         fd = None
         try:
             fd = os.open(str(bp), os.O_RDWR | os.O_CREAT, 0o644)
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            _lock_ex(fd)
             os.lseek(fd, 0, os.SEEK_SET)
             os.ftruncate(fd, 0)
             os.write(fd, json.dumps(new_blocks, ensure_ascii=False, indent=2).encode("utf-8"))
         finally:
             if fd is not None:
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    _unlock(fd)
                     os.close(fd)
                 except OSError:
                     pass
@@ -680,7 +712,7 @@ def _consolidate_scratchpad_flat(
     try:
         lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o644)
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_nb(lock_fd)
         except (OSError, BlockingIOError):
             log.info("Scratchpad consolidation already running (lock held), skipping")
             return None
@@ -745,7 +777,7 @@ Respond with JSON only (no fences):
     finally:
         if lock_fd is not None:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _unlock(lock_fd)
                 os.close(lock_fd)
             except OSError:
                 pass

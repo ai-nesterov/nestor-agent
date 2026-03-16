@@ -27,7 +27,7 @@ export function initSettings({ ws, state }) {
                     <div class="form-field"><label>Port</label><input id="s-local-port" type="number" value="8766" style="width:100px"></div>
                     <div class="form-field"><label>GPU Layers (-1 = all)</label><input id="s-local-gpu-layers" type="number" value="-1" style="width:100px"></div>
                     <div class="form-field"><label>Context Length</label><input id="s-local-ctx" type="number" value="16384" style="width:120px" placeholder="16384"></div>
-                    <div class="form-field"><label>Chat Format</label><input id="s-local-chat-format" value="chatml-function-calling" style="width:200px"></div>
+                    <div class="form-field"><label>Chat Format</label><input id="s-local-chat-format" value="" placeholder="auto-detect" style="width:200px"></div>
                 </div>
                 <div class="form-row" style="align-items:center;gap:8px">
                     <button class="btn btn-primary" id="btn-local-start">Start</button>
@@ -46,19 +46,19 @@ export function initSettings({ ws, state }) {
                 </div>
                 <div class="form-row" style="align-items:flex-end">
                     <div class="form-field"><label>Main Model</label><input id="s-model" value="anthropic/claude-sonnet-4.6" style="width:250px"></div>
-                    <label class="local-toggle"><input type="checkbox" id="s-local-main" disabled> Local</label>
+                    <label class="local-toggle"><input type="checkbox" id="s-local-main"> Local</label>
                 </div>
                 <div class="form-row" style="align-items:flex-end">
                     <div class="form-field"><label>Code Model</label><input id="s-model-code" value="anthropic/claude-sonnet-4.6" style="width:250px"></div>
-                    <label class="local-toggle"><input type="checkbox" id="s-local-code" disabled> Local</label>
+                    <label class="local-toggle"><input type="checkbox" id="s-local-code"> Local</label>
                 </div>
                 <div class="form-row" style="align-items:flex-end">
                     <div class="form-field"><label>Light Model</label><input id="s-model-light" value="google/gemini-3-flash-preview" style="width:250px"></div>
-                    <label class="local-toggle"><input type="checkbox" id="s-local-light" disabled> Local</label>
+                    <label class="local-toggle"><input type="checkbox" id="s-local-light"> Local</label>
                 </div>
                 <div class="form-row" style="align-items:flex-end">
                     <div class="form-field"><label>Fallback Model</label><input id="s-model-fallback" value="google/gemini-3-flash-preview" style="width:250px"></div>
-                    <label class="local-toggle"><input type="checkbox" id="s-local-fallback" disabled> Local</label>
+                    <label class="local-toggle"><input type="checkbox" id="s-local-fallback"> Local</label>
                 </div>
                 <div class="form-row">
                     <div class="form-field"><label>Claude Code Model</label><input id="s-claude-code-model" value="sonnet" placeholder="sonnet, opus, or full name" style="width:250px"></div>
@@ -230,7 +230,15 @@ export function initSettings({ ws, state }) {
             document.getElementById('btn-local-stop').style.opacity = isReady ? '1' : '0.5';
             document.getElementById('btn-local-test').style.opacity = isReady ? '1' : '0.5';
             ['s-local-main', 's-local-code', 's-local-light', 's-local-fallback'].forEach(id => {
-                document.getElementById(id).disabled = !isReady;
+                const cb = document.getElementById(id);
+                const label = cb.closest('.local-toggle');
+                if (cb.checked && !isReady) {
+                    label.title = 'Local server is not running \u2014 requests will fail until started';
+                    label.style.color = 'var(--amber)';
+                } else {
+                    label.title = '';
+                    label.style.color = '';
+                }
             });
         }).catch(() => {});
     }

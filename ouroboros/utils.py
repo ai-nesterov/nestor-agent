@@ -449,17 +449,19 @@ async def collect_evolution_metrics(repo_dir: str, data_dir: str | None = None) 
             if f.endswith(".py"):
                 show = sp.run(
                     ["git", "show", f"{tag}:{f}"],
-                    cwd=repo_dir, capture_output=True, text=True
+                    cwd=repo_dir, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
                 )
-                if show.returncode == 0:
+                if show.returncode == 0 and show.stdout:
                     python_lines += len(show.stdout.splitlines())
 
         def get_file_size_kb(filepath: str) -> float:
             show = sp.run(
                 ["git", "show", f"{tag}:{filepath}"],
-                cwd=repo_dir, capture_output=True, text=True
+                cwd=repo_dir, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
             )
-            if show.returncode == 0:
+            if show.returncode == 0 and show.stdout:
                 return round(len(show.stdout.encode("utf-8")) / 1024, 2)
             return 0
 

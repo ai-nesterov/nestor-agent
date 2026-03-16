@@ -81,7 +81,11 @@ def call_llm_with_retry(
             add_usage(accumulated_usage, usage)
 
             cost = float(usage.get("cost") or 0)
-            if not cost:
+            display_model = model
+            if use_local:
+                cost = 0.0
+                display_model = f"{model} (local)"
+            elif cost == 0.0:
                 cost = estimate_cost(
                     model,
                     int(usage.get("prompt_tokens") or 0),
@@ -91,7 +95,7 @@ def call_llm_with_retry(
                 )
 
             category = task_type if task_type in ("evolution", "consciousness", "review", "summarize") else "task"
-            emit_llm_usage_event(event_queue, task_id, model, usage, cost, category)
+            emit_llm_usage_event(event_queue, task_id, display_model, usage, cost, category)
 
             tool_calls = msg.get("tool_calls") or []
             content = msg.get("content")
@@ -126,7 +130,7 @@ def call_llm_with_retry(
             _round_event = {
                 "ts": utc_now_iso(), "type": "llm_round",
                 "task_id": task_id,
-                "round": round_idx, "model": model,
+                "round": round_idx, "model": display_model,
                 "reasoning_effort": effort,
                 "prompt_tokens": int(usage.get("prompt_tokens") or 0),
                 "completion_tokens": int(usage.get("completion_tokens") or 0),
@@ -140,7 +144,7 @@ def call_llm_with_retry(
                 "task_type": task_type,
                 "round": round_idx,
                 "attempt": attempt + 1,
-                "model": model,
+                "model": display_model,
                 "reasoning_effort": effort,
                 "prompt_tokens": _round_event["prompt_tokens"],
                 "completion_tokens": _round_event["completion_tokens"],

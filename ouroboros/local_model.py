@@ -167,7 +167,7 @@ class LocalModelManager:
         port: int = _LOCAL_MODEL_DEFAULT_PORT,
         n_gpu_layers: int = -1,
         n_ctx: int = 0,
-        chat_format: str = "chatml-function-calling",
+        chat_format: str = "",
     ) -> None:
         """Start the llama-cpp-python server as a subprocess."""
         with self._lock:

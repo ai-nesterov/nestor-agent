@@ -7,15 +7,41 @@ Contract: load scratchpad/identity, chat_history().
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
 import pathlib
+import sys
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from ouroboros.utils import utc_now_iso, read_text, write_text, append_jsonl, short
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_ex(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    def _lock_sh(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    def _unlock(fd: int) -> None:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    import fcntl
+
+    def _lock_ex(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _lock_sh(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+
+    def _unlock(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +97,7 @@ class Memory:
         fd = None
         try:
             fd = os.open(str(bp), os.O_RDONLY)
-            fcntl.flock(fd, fcntl.LOCK_SH)
+            _lock_sh(fd)
             data = bp.read_text(encoding="utf-8")
             blocks = json.loads(data) if data.strip() else []
             return blocks if isinstance(blocks, list) else []
@@ -81,7 +107,7 @@ class Memory:
         finally:
             if fd is not None:
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    _unlock(fd)
                     os.close(fd)
                 except OSError:
                     pass
@@ -116,7 +142,7 @@ class Memory:
         fd = None
         try:
             fd = os.open(str(bp), os.O_RDWR | os.O_CREAT, 0o644)
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            _lock_ex(fd)
 
             raw = b""
             while True:
@@ -150,7 +176,7 @@ class Memory:
         finally:
             if fd is not None:
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    _unlock(fd)
                     os.close(fd)
                 except OSError:
                     pass
