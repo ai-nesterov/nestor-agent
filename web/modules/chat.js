@@ -88,7 +88,7 @@ export function initChat({ ws, state, updateUnreadBadge }) {
         if (pending) bubble.classList.add('pending');
         if (ephemeral) bubble.dataset.ephemeral = '1';
         if (clientMessageId) bubble.dataset.clientMessageId = clientMessageId;
-        const sender = role === 'user' ? 'You' : (isProgress ? '\uD83D\uDCAC Ouroboros' : 'Ouroboros');
+        const sender = role === 'user' ? 'You' : 'Ouroboros';
         const rendered = role === 'assistant' ? renderMarkdown(text) : escapeHtml(text);
         const timeFmt = formatMsgTime(ts);
         const timeHtml = timeFmt

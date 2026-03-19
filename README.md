@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.3.0](https://img.shields.io/badge/version-4.3.0-green.svg)](VERSION)
+[![Version 4.3.1](https://img.shields.io/badge/version-4.3.1-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -238,6 +238,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.3.1 | 2026-03-19 | Fix: remove semi-transparent dimming from progress chat bubbles and remove duplicate `💬` emoji that appeared in both sender label and message text. |
 | 4.3.0 | 2026-03-19 | Reliability and continuity release: remove silent truncation from critical task/memory paths, persist honest subtask lifecycle states and full task results, restore transient chat wake banner, replace local-model hard prompt slicing with explicit non-core compaction plus fail-fast overflow, route Anthropic/OpenRouter calls without hard provider pinning while keeping parameter guarantees, and align async review calls with shared LLM routing/usage observability. |
 | 4.2.0 | 2026-03-16 | Cross-platform hardening release: replace Unix-only file locking in memory/consolidation with Windows-safe locking, refresh default model tiers (Opus main/code, Sonnet light/fallback, task effort `medium`), improve reconnect recovery with heartbeat/watchdog/history resync, switch local model chat format to auto-detect, and sync public docs with the current codebase and BIBLE structure. |
 | 4.1.0 | 2026-03-16 | Public desktop release: port the v4 architecture and UI into the platform branch, preserve cross-platform packaging and Windows runtime support, and ship signed notarized macOS packaging. |
