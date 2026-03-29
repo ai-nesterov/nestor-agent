@@ -10,6 +10,7 @@ import pathlib
 import uuid
 from typing import Any, Dict, List, Tuple
 
+from ouroboros.config import use_local_for_lane
 from ouroboros.tools.registry import ToolContext, ToolEntry
 from ouroboros.utils import read_text, safe_relpath, utc_now_iso
 
@@ -313,7 +314,7 @@ Now write a comprehensive summary:"""
             {"role": "user", "content": prompt}
         ]
 
-        _use_local_light = os.environ.get("USE_LOCAL_LIGHT", "").lower() in ("true", "1")
+        _use_local_light = use_local_for_lane("LIGHT")
         response, usage = llm.chat(
             messages=messages,
             model=model,

@@ -6,13 +6,11 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
+from ouroboros.config import has_local_routing_enabled
 
 def has_local_routing(settings: dict) -> bool:
     """Return True when any model lane is configured to use the local server."""
-    return any(
-        str(settings.get(k)).lower() in ("true", "1", "yes")
-        for k in ("USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK")
-    )
+    return has_local_routing_enabled(settings)
 
 
 def setup_remote_if_configured(settings: dict, log) -> None:

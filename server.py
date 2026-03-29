@@ -115,6 +115,7 @@ def broadcast_ws_sync(msg: dict) -> None:
 from ouroboros.config import (
     SETTINGS_DEFAULTS as _SETTINGS_DEFAULTS,
     load_settings, save_settings, apply_settings_to_env as _apply_settings_to_env,
+    has_configured_llm_backend,
 )
 from ouroboros.server_runtime import has_local_routing, setup_remote_if_configured, ws_heartbeat_loop
 
@@ -895,14 +896,14 @@ async def lifespan(app):
     )
 
     settings = load_settings()
-    has_api_key = bool(settings.get("OPENROUTER_API_KEY"))
     has_local = has_local_routing(settings)
+    has_backend = has_configured_llm_backend(settings)
 
-    if has_api_key or has_local:
+    if has_backend:
         threading.Thread(target=_run_supervisor, args=(settings,), daemon=True).start()
     else:
         _supervisor_ready.set()
-        log.info("No API key or local model configured. Supervisor not started.")
+        log.info("No LLM provider configured. Supervisor not started.")
 
     if has_local and settings.get("LOCAL_MODEL_SOURCE"):
         from ouroboros.local_model_autostart import auto_start_local_model

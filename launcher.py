@@ -39,6 +39,7 @@ from ouroboros.config import (
     HOME, APP_ROOT, REPO_DIR, DATA_DIR, SETTINGS_PATH, PID_FILE, PORT_FILE,
     RESTART_EXIT_CODE, PANIC_EXIT_CODE, AGENT_SERVER_PORT,
     read_version, load_settings, save_settings, acquire_pid_lock, release_pid_lock,
+    has_configured_llm_backend, has_local_model_config,
 )
 MAX_CRASH_RESTARTS = 5
 CRASH_WINDOW_SEC = 120
@@ -816,9 +817,9 @@ def _save_settings(settings: dict) -> None:
 
 
 def _run_first_run_wizard() -> bool:
-    """Show setup wizard if no API key or local model configured. Returns True if configured."""
+    """Show setup wizard if no LLM backend is configured. Returns True if configured."""
     settings = _load_settings()
-    if settings.get("OPENROUTER_API_KEY") or settings.get("LOCAL_MODEL_SOURCE"):
+    if has_configured_llm_backend(settings):
         return True
 
     import webview
@@ -827,9 +828,9 @@ def _run_first_run_wizard() -> bool:
     class WizardApi:
         def save_wizard(self, data: dict) -> str:
             key = str(data.get("OPENROUTER_API_KEY", "")).strip()
-            has_local = bool(data.get("LOCAL_MODEL_SOURCE", "").strip())
+            has_local = has_local_model_config(data)
             if len(key) < 10 and not has_local:
-                return "Provide an OpenRouter API key or select a local model."
+                return "Configure at least one LLM provider: OpenRouter or local model."
             settings.update(data)
             try:
                 _save_settings(settings)

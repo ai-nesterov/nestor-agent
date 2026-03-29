@@ -16,6 +16,7 @@ import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ouroboros.config import (
+    has_local_model_config,
     resolve_local_model_api_key,
     resolve_local_model_base_url,
     resolve_openrouter_base_url,
@@ -720,6 +721,19 @@ class LLMClient:
         temperature: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Send a chat request to OpenRouter."""
+        current_api_key = self._api_key_override
+        if current_api_key is None:
+            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not str(current_api_key or "").strip():
+            if has_local_model_config():
+                raise RuntimeError(
+                    "Cloud LLM backend is not configured (missing OPENROUTER_API_KEY). "
+                    "Local model is configured; route this call through local backend."
+                )
+            raise RuntimeError(
+                "No LLM provider configured. Configure OpenRouter API key "
+                "or local model backend."
+            )
         client = self._get_client()
         kwargs = self._build_openrouter_kwargs(
             messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature

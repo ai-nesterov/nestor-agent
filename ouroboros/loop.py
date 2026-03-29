@@ -19,6 +19,7 @@ from ouroboros.tool_policy import initial_tool_schemas, list_non_core_tools
 from ouroboros.tools.registry import ToolRegistry
 from ouroboros.context_compaction import compact_tool_history_llm
 from ouroboros.utils import estimate_tokens
+from ouroboros.config import use_local_for_lane
 
 from ouroboros.loop_tool_execution import (
     StatefulToolExecutor,
@@ -271,7 +272,7 @@ def run_llm_loop(
     """
     active_model = llm.default_model()
     active_effort = initial_effort
-    active_use_local = os.environ.get("USE_LOCAL_MAIN", "").lower() in ("true", "1")
+    active_use_local = use_local_for_lane("MAIN")
 
     llm_trace: Dict[str, Any] = {"reasoning_notes": [], "tool_calls": []}
     accumulated_usage: Dict[str, Any] = {}
@@ -373,7 +374,7 @@ def run_llm_loop(
                         f"If background consciousness is running, it will retry when the provider recovers."
                     ), accumulated_usage, llm_trace
 
-                fallback_use_local = os.environ.get("USE_LOCAL_FALLBACK", "").lower() in ("true", "1")
+                fallback_use_local = use_local_for_lane("FALLBACK")
                 primary_tag = " (local)" if active_use_local else ""
                 fallback_tag = " (local)" if fallback_use_local else ""
                 emit_progress(f"⚡ Fallback: {active_model}{primary_tag} → {fallback_model}{fallback_tag} after empty response")

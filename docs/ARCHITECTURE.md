@@ -141,8 +141,8 @@ launcher.py main()
 
 ### First-run wizard
 
-Shown when `settings.json` does not exist or has no `OPENROUTER_API_KEY`.
-Fields: OpenRouter API Key (required), Total Budget ($), Main Model.
+Shown when `settings.json` has no configured LLM backend.
+Fields: OpenRouter API Key (optional), local model preset (optional), Total Budget ($), Main Model.
 On save: writes `settings.json`, closes wizard, proceeds to main app.
 
 ### Core file sync (`_sync_core_files`)
@@ -203,7 +203,7 @@ Navigation is a left sidebar with 8 pages.
 
 ### 3.3 Settings
 
-- **API Keys**: OpenRouter (required), OpenAI (optional, for web search), Anthropic (optional), Local model (optional).
+- **API Keys**: OpenRouter (optional, required for cloud path), OpenAI (optional, for web search), Anthropic (optional), Local model (optional).
   Keys are displayed as masked values (e.g., `sk-or-v1...`).
   Only overwritten on save if user enters a new value (not containing `...`).
 - **Provider Base URLs**: OpenRouter base URL and optional local OpenAI-compatible base URL.
@@ -506,7 +506,7 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| OPENROUTER_API_KEY | "" | Required. Main LLM API key |
+| OPENROUTER_API_KEY | "" | Optional cloud LLM API key (required only for OpenRouter mode) |
 | OPENROUTER_BASE_URL | https://openrouter.ai/api/v1 | Base URL for OpenRouter-compatible cloud routing |
 | OPENAI_API_KEY | "" | Optional. For web_search tool |
 | ANTHROPIC_API_KEY | "" | Optional. For Claude Code CLI |

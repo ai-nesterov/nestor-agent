@@ -20,6 +20,7 @@ from typing import Tuple, Dict, Any, List, Optional
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.pricing import emit_llm_usage_event, estimate_cost
 from supervisor.state import update_budget_from_usage
+from ouroboros.config import use_local_for_lane
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def check_safety(
     # ── Layer 1: Fast check (light model) ──
     fast_status = None
     fast_reason = None
-    _use_local_light = os.environ.get("USE_LOCAL_LIGHT", "").lower() in ("true", "1")
+    _use_local_light = use_local_for_lane("LIGHT")
     try:
         light_model = os.environ.get("OUROBOROS_MODEL_LIGHT", DEFAULT_LIGHT_MODEL)
         log.info(f"Running fast safety check on {tool_name} using {light_model} (local={_use_local_light})")
@@ -193,7 +194,7 @@ def check_safety(
         fast_reason = str(e)
 
     # ── Layer 2: Deep check (heavy model, with nudge to reduce false positives) ──
-    _use_local_code = os.environ.get("USE_LOCAL_CODE", "").lower() in ("true", "1")
+    _use_local_code = use_local_for_lane("CODE")
     try:
         heavy_model = os.environ.get(
             "OUROBOROS_MODEL_CODE",

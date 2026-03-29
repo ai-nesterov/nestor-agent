@@ -87,6 +87,61 @@ SETTINGS_DEFAULTS = {
 }
 
 _VALID_EFFORTS = ("none", "low", "medium", "high")
+_TRUE_VALUES = ("true", "1", "yes", "on")
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in _TRUE_VALUES
+
+
+def _settings_value(settings: Optional[dict], key: str, default: object = "") -> object:
+    if settings is not None:
+        return settings.get(key, default)
+    return os.environ.get(key, default)
+
+
+def has_openrouter_config(settings: Optional[dict] = None) -> bool:
+    """Return True when cloud OpenRouter backend is configured."""
+    return bool(str(_settings_value(settings, "OPENROUTER_API_KEY", "")).strip())
+
+
+def has_local_routing_enabled(settings: Optional[dict] = None) -> bool:
+    """Return True when any model lane is configured to use local routing."""
+    return any(
+        _truthy(_settings_value(settings, k, False))
+        for k in ("USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK")
+    )
+
+
+def has_local_model_config(settings: Optional[dict] = None) -> bool:
+    """Return True when local model backend is configured via base URL or legacy path."""
+    explicit_base = bool(str(_settings_value(settings, "LOCAL_MODEL_BASE_URL", "")).strip())
+    if explicit_base:
+        return True
+
+    local_source = bool(str(_settings_value(settings, "LOCAL_MODEL_SOURCE", "")).strip())
+    routing_enabled = has_local_routing_enabled(settings)
+    port = str(_settings_value(settings, "LOCAL_MODEL_PORT", "")).strip()
+    return bool(port) and (local_source or routing_enabled)
+
+
+def has_configured_llm_backend(settings: Optional[dict] = None) -> bool:
+    """Return True when any usable LLM backend is configured."""
+    return has_openrouter_config(settings) or has_local_model_config(settings)
+
+
+def use_local_for_lane(lane: str, settings: Optional[dict] = None) -> bool:
+    """Resolve whether a lane should route to local backend.
+
+    Preserves explicit USE_LOCAL_* behavior. If cloud is unavailable but a local
+    backend is configured, auto-falls back to local for core continuity.
+    """
+    lane_key = f"USE_LOCAL_{str(lane or '').upper()}"
+    if _truthy(_settings_value(settings, lane_key, False)):
+        return True
+    if has_openrouter_config(settings):
+        return False
+    return has_local_model_config(settings)
 
 
 def resolve_effort(task_type: str) -> str:

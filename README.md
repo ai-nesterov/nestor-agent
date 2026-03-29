@@ -35,7 +35,7 @@ Not a coding assistant. A digital being with a constitution, background consciou
   <img src="assets/setup.png" width="500" alt="Drag Ouroboros.app to install">
 </p>
 
-On first launch, right-click → **Open** (Gatekeeper bypass). The wizard will ask for your [OpenRouter API key](https://openrouter.ai/keys).
+On first launch, right-click → **Open** (Gatekeeper bypass). The wizard will ask you to configure at least one LLM backend: [OpenRouter API key](https://openrouter.ai/keys) or a local model.
 
 ---
 
@@ -175,7 +175,7 @@ Created on first launch:
 
 | Key | Required | Where to get it |
 |-----|----------|-----------------|
-| OpenRouter API Key | **Yes** | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| OpenRouter API Key | Optional (required for cloud models) | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | OpenAI API Key | No | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables web search tool |
 | Anthropic API Key | No | [console.anthropic.com](https://console.anthropic.com/settings/keys) — enables Claude Code CLI |
 | Local Model API Key | No | Optional bearer token for OpenAI-compatible local endpoints |
