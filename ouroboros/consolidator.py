@@ -62,9 +62,30 @@ log = logging.getLogger(__name__)
 BLOCK_SIZE = 100                          # Messages per consolidation block
 MAX_SUMMARY_BLOCKS = 10                   # Compress into era when exceeded
 ERA_COMPRESS_COUNT = 4                    # Oldest blocks to compress per era
-CONSOLIDATION_MODEL = "google/gemini-3-flash-preview"
+CONSOLIDATION_MODEL = "Qwen/Qwen3.5-27B"
 CONSOLIDATION_REASONING_EFFORT = "medium"
 MAX_SUMMARY_CHARS = 90000                 # Hard cap preserved from old system
+
+
+def resolve_consolidation_model() -> str:
+    """Resolve model used for task/chat consolidation.
+
+    Priority:
+    1) OUROBOROS_MODEL_CONSOLIDATION (optional explicit override)
+    2) OUROBOROS_MODEL_LIGHT
+    3) OUROBOROS_MODEL
+    4) module default CONSOLIDATION_MODEL
+    """
+    explicit = str(os.environ.get("OUROBOROS_MODEL_CONSOLIDATION", "")).strip()
+    if explicit:
+        return explicit
+    light = str(os.environ.get("OUROBOROS_MODEL_LIGHT", "")).strip()
+    if light:
+        return light
+    main = str(os.environ.get("OUROBOROS_MODEL", "")).strip()
+    if main:
+        return main
+    return CONSOLIDATION_MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +322,7 @@ Create a detailed episodic memory entry from these {message_count} messages.
     try:
         response_msg, usage = llm_client.chat(
             messages=[{"role": "user", "content": prompt}],
-            model=CONSOLIDATION_MODEL,
+            model=resolve_consolidation_model(),
             tools=None,
             reasoning_effort="low",
             max_tokens=4096,
@@ -349,7 +370,7 @@ Write as Ouroboros (first person). Aim for 30-40% of original length.
     try:
         msg, usage = llm_client.chat(
             messages=[{"role": "user", "content": prompt}],
-            model=CONSOLIDATION_MODEL,
+            model=resolve_consolidation_model(),
             tools=None,
             reasoning_effort="low",
             max_tokens=4096,
@@ -647,7 +668,7 @@ Respond with JSON only (no fences):
     try:
         msg, usage = llm_client.chat(
             messages=[{"role": "user", "content": prompt}],
-            model=CONSOLIDATION_MODEL,
+            model=resolve_consolidation_model(),
             reasoning_effort="low",
             max_tokens=4096,
         )
@@ -752,7 +773,7 @@ Respond with JSON only (no fences):
 
         msg, usage = llm_client.chat(
             messages=[{"role": "user", "content": prompt}],
-            model=CONSOLIDATION_MODEL,
+            model=resolve_consolidation_model(),
             reasoning_effort="low",
             max_tokens=4096,
         )

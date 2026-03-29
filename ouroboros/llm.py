@@ -366,9 +366,23 @@ class LLMClient:
                     "for model '%s'",
                     model,
                 )
-            return self._chat_local(messages, model, tools, max_tokens, tool_choice)
+            return self._chat_local(
+                messages=messages,
+                model=model,
+                tools=tools,
+                max_tokens=max_tokens,
+                tool_choice=tool_choice,
+            )
 
-        return self._chat_openrouter(messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature)
+        return self._chat_openrouter(
+            messages=messages,
+            model=model,
+            tools=tools,
+            reasoning_effort=reasoning_effort,
+            max_tokens=max_tokens,
+            tool_choice=tool_choice,
+            temperature=temperature,
+        )
 
     async def chat_async(
         self,
@@ -494,10 +508,8 @@ class LLMClient:
         for attempt in range(3):
             try:
                 resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
-                if (
-                    getattr(resp, "status_code", None) == 404
-                    and self._is_local_model_not_found(resp)
-                ):
+                status_code = int(getattr(resp, "status_code", 0) or 0)
+                if 400 <= status_code < 500 and self._is_local_model_not_found(resp):
                     fallback_model = self._choose_local_fallback_model(
                         requested_model=requested_model,
                         current_model=str(kwargs.get("model") or "").strip(),
@@ -556,14 +568,33 @@ class LLMClient:
 
     @staticmethod
     def _is_local_model_not_found(response: Any) -> bool:
-        """Best-effort detection of 404 model-not-found payloads."""
+        """Best-effort detection of model-not-found payloads."""
         try:
             payload = response.json()
         except Exception:
             return False
+        if not isinstance(payload, dict):
+            return False
+
         err_type = str(payload.get("type", "")).strip().lower()
         err_msg = str(payload.get("message", "")).strip().lower()
-        return err_type == "model_not_found" or ("model" in err_msg and "not found" in err_msg)
+        if err_type == "model_not_found" or ("model" in err_msg and "not found" in err_msg):
+            return True
+
+        # Some OpenAI-compatible backends wrap errors under "error".
+        nested = payload.get("error")
+        if isinstance(nested, dict):
+            nested_type = str(nested.get("type", "")).strip().lower()
+            nested_code = str(nested.get("code", "")).strip().lower()
+            nested_msg = str(nested.get("message", "")).strip().lower()
+            if (
+                nested_type == "model_not_found"
+                or nested_code == "model_not_found"
+                or ("model" in nested_msg and "not found" in nested_msg)
+            ):
+                return True
+
+        return False
 
     def _choose_local_fallback_model(
         self,

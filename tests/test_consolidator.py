@@ -8,6 +8,8 @@ from ouroboros.consolidator import (
     should_consolidate,
     consolidate,
     migrate_dialogue_summary_to_blocks,
+    resolve_consolidation_model,
+    CONSOLIDATION_MODEL,
     _load_meta,
     _save_meta,
     _count_lines,
@@ -167,3 +169,27 @@ def test_migrate_skips_if_blocks_exist(tmp_path):
 
     migrate_dialogue_summary_to_blocks(summary_path, blocks_path)
     assert json.loads(blocks_path.read_text()) == []
+
+
+def test_resolve_consolidation_model_prefers_explicit_override(monkeypatch):
+    monkeypatch.setenv("OUROBOROS_MODEL_CONSOLIDATION", "Openai/Gpt-oss-120b")
+    monkeypatch.setenv("OUROBOROS_MODEL_LIGHT", "Qwen/Qwen3.5-27B")
+    monkeypatch.setenv("OUROBOROS_MODEL", "Qwen/Qwen3-Coder-Next")
+    assert resolve_consolidation_model() == "Openai/Gpt-oss-120b"
+
+
+def test_resolve_consolidation_model_falls_back_to_light_then_main(monkeypatch):
+    monkeypatch.delenv("OUROBOROS_MODEL_CONSOLIDATION", raising=False)
+    monkeypatch.setenv("OUROBOROS_MODEL_LIGHT", "Qwen/Qwen3.5-27B")
+    monkeypatch.setenv("OUROBOROS_MODEL", "Qwen/Qwen3-Coder-Next")
+    assert resolve_consolidation_model() == "Qwen/Qwen3.5-27B"
+
+    monkeypatch.delenv("OUROBOROS_MODEL_LIGHT", raising=False)
+    assert resolve_consolidation_model() == "Qwen/Qwen3-Coder-Next"
+
+
+def test_resolve_consolidation_model_uses_default_when_unset(monkeypatch):
+    monkeypatch.delenv("OUROBOROS_MODEL_CONSOLIDATION", raising=False)
+    monkeypatch.delenv("OUROBOROS_MODEL_LIGHT", raising=False)
+    monkeypatch.delenv("OUROBOROS_MODEL", raising=False)
+    assert resolve_consolidation_model() == CONSOLIDATION_MODEL
