@@ -366,7 +366,7 @@ class LLMClient:
                     "for model '%s'",
                     model,
                 )
-            return self._chat_local(messages, tools, max_tokens, tool_choice)
+            return self._chat_local(messages, model, tools, max_tokens, tool_choice)
 
         return self._chat_openrouter(messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature)
 
@@ -434,6 +434,7 @@ class LLMClient:
     def _chat_local(
         self,
         messages: List[Dict[str, Any]],
+        model: str,
         tools: Optional[List[Dict[str, Any]]],
         max_tokens: int,
         tool_choice: str,
@@ -471,8 +472,9 @@ class LLMClient:
                 for t in tools
             ]
 
+        requested_model = str(model or "").strip() or "local-model"
         kwargs: Dict[str, Any] = {
-            "model": "local-model",
+            "model": requested_model,
             "messages": clean_messages,
             "max_tokens": local_max,
         }
@@ -492,6 +494,26 @@ class LLMClient:
         for attempt in range(3):
             try:
                 resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
+                if (
+                    getattr(resp, "status_code", None) == 404
+                    and self._is_local_model_not_found(resp)
+                ):
+                    fallback_model = self._choose_local_fallback_model(
+                        requested_model=requested_model,
+                        current_model=str(kwargs.get("model") or "").strip(),
+                        base_url=base_url,
+                        headers=headers,
+                    )
+                    if fallback_model and fallback_model != kwargs.get("model"):
+                        kwargs["model"] = fallback_model
+                        log.warning(
+                            "Local backend model '%s' not found at %s; retrying with '%s'",
+                            requested_model,
+                            base_url,
+                            fallback_model,
+                        )
+                        time.sleep(0.2)
+                        continue
                 resp.raise_for_status()
                 resp_dict = resp.json()
                 last_exc = None
@@ -531,6 +553,60 @@ class LLMClient:
 
         usage["cost"] = 0.0
         return msg, usage
+
+    @staticmethod
+    def _is_local_model_not_found(response: Any) -> bool:
+        """Best-effort detection of 404 model-not-found payloads."""
+        try:
+            payload = response.json()
+        except Exception:
+            return False
+        err_type = str(payload.get("type", "")).strip().lower()
+        err_msg = str(payload.get("message", "")).strip().lower()
+        return err_type == "model_not_found" or ("model" in err_msg and "not found" in err_msg)
+
+    def _choose_local_fallback_model(
+        self,
+        requested_model: str,
+        current_model: str,
+        base_url: str,
+        headers: Dict[str, str],
+    ) -> Optional[str]:
+        """Pick a compatible local model from /models when requested one is unavailable."""
+        try:
+            import requests
+
+            resp = requests.get(f"{base_url}/models", headers=headers, timeout=20)
+            resp.raise_for_status()
+            data = resp.json() if isinstance(resp.json(), dict) else {}
+            items = data.get("data", []) or []
+            available = [
+                str(item.get("id", "")).strip()
+                for item in items
+                if isinstance(item, dict) and str(item.get("id", "")).strip()
+            ]
+        except Exception:
+            return None
+
+        if not available:
+            return None
+        if requested_model in available:
+            return requested_model
+
+        preferred = [
+            str(os.environ.get("OUROBOROS_MODEL", "")).strip(),
+            str(os.environ.get("OUROBOROS_MODEL_LIGHT", "")).strip(),
+            str(os.environ.get("OUROBOROS_MODEL_CODE", "")).strip(),
+            "Qwen/Qwen3.5-27B",
+        ]
+        for candidate in preferred:
+            if candidate and candidate != current_model and candidate in available:
+                return candidate
+
+        for candidate in available:
+            if candidate != current_model:
+                return candidate
+        return None
 
     @staticmethod
     def _parse_tool_calls_from_content(

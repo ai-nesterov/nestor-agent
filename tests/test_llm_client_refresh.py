@@ -109,6 +109,7 @@ class TestLlmClientRefresh(unittest.TestCase):
                 client = LLMClient()
                 client._chat_local(
                     messages=[{"role": "user", "content": "hi"}],
+                    model="Qwen/Qwen3.5-27B",
                     tools=None,
                     max_tokens=64,
                     tool_choice="auto",
@@ -152,6 +153,7 @@ class TestLlmClientRefresh(unittest.TestCase):
                 client = LLMClient()
                 client._chat_local(
                     messages=[{"role": "user", "content": "hi"}],
+                    model="Qwen/Qwen3.5-27B",
                     tools=None,
                     max_tokens=64,
                     tool_choice="auto",
@@ -159,3 +161,79 @@ class TestLlmClientRefresh(unittest.TestCase):
 
         self.assertEqual(_FakeRequests.last_url, "http://localhost:1234/v1/chat/completions")
         self.assertEqual(_FakeRequests.last_headers.get("Authorization"), "Bearer local-secret")
+
+    def test_local_chat_falls_back_when_requested_model_not_found(self):
+        from ouroboros.llm import LLMClient
+
+        class _FakeResponse:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise RuntimeError(f"HTTP {self.status_code}")
+
+            def json(self):
+                return self._payload
+
+        class _FakeRequests:
+            post_models = []
+
+            @staticmethod
+            def post(url, json=None, headers=None, timeout=None):
+                _FakeRequests.post_models.append((url, (json or {}).get("model")))
+                model = (json or {}).get("model")
+                if model == "google/gemini-3-flash-preview":
+                    return _FakeResponse(
+                        404,
+                        {
+                            "type": "model_not_found",
+                            "message": "Model 'google/gemini-3-flash-preview' not found",
+                        },
+                    )
+                return _FakeResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "ok"}}],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    },
+                )
+
+            @staticmethod
+            def get(url, headers=None, timeout=None):
+                return _FakeResponse(
+                    200,
+                    {
+                        "data": [
+                            {"id": "Qwen/Qwen3.5-27B"},
+                            {"id": "Qwen/Qwen3-Coder-Next"},
+                        ]
+                    },
+                )
+
+        with patch.dict(sys.modules, {"requests": _FakeRequests}):
+            with patch.dict(
+                os.environ,
+                {
+                    "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
+                    "OUROBOROS_MODEL": "Qwen/Qwen3.5-27B",
+                },
+                clear=False,
+            ):
+                client = LLMClient()
+                client._chat_local(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="google/gemini-3-flash-preview",
+                    tools=None,
+                    max_tokens=64,
+                    tool_choice="auto",
+                )
+
+        self.assertEqual(
+            _FakeRequests.post_models,
+            [
+                ("http://localhost:1234/v1/chat/completions", "google/gemini-3-flash-preview"),
+                ("http://localhost:1234/v1/chat/completions", "Qwen/Qwen3.5-27B"),
+            ],
+        )
