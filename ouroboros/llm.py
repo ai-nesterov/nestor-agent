@@ -505,6 +505,7 @@ class LLMClient:
         last_exc: Optional[Exception] = None
         last_conn_err: Optional[Exception] = None
         resp_dict: Dict[str, Any] = {}
+        tools_disabled_for_compat = False
         for attempt in range(3):
             try:
                 resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
@@ -526,6 +527,30 @@ class LLMClient:
                         )
                         time.sleep(0.2)
                         continue
+                if 400 <= status_code < 500:
+                    error_text = self._extract_local_error_text(resp)
+                    if self._is_local_context_error_text(error_text):
+                        self._shrink_messages_from_error(clean_messages, error_text)
+                        kwargs["messages"] = clean_messages
+                        log.warning(
+                            "Local backend rejected request due to context length for model '%s'; "
+                            "shrinking messages and retrying",
+                            str(kwargs.get("model") or "").strip(),
+                        )
+                        time.sleep(0.2)
+                        continue
+                    if clean_tools and not tools_disabled_for_compat and self._is_local_tools_unsupported_text(error_text):
+                        tools_disabled_for_compat = True
+                        clean_tools = None
+                        kwargs.pop("tools", None)
+                        kwargs.pop("tool_choice", None)
+                        log.warning(
+                            "Local backend rejected tools payload for model '%s'; "
+                            "retrying without tools",
+                            str(kwargs.get("model") or "").strip(),
+                        )
+                        time.sleep(0.2)
+                        continue
                 resp.raise_for_status()
                 resp_dict = resp.json()
                 last_exc = None
@@ -536,10 +561,15 @@ class LLMClient:
                 if isinstance(exc, requests.exceptions.ConnectionError):
                     last_conn_err = exc
                 err = str(exc)
+                resp = getattr(exc, "response", None)
+                if resp is not None:
+                    backend_err = self._extract_local_error_text(resp)
+                    if backend_err and backend_err not in err.lower():
+                        err = f"{err} | backend_error={backend_err[:500]}"
                 if "context_length_exceeded" in err:
                     raise LocalContextTooLargeError(err) from exc
                 if attempt >= 2:
-                    log.warning("Local model request failed: %s", exc)
+                    log.warning("Local model request failed: %s", err)
                     break
                 time.sleep(0.2)
         if last_conn_err is not None:
@@ -567,6 +597,48 @@ class LLMClient:
         return msg, usage
 
     @staticmethod
+    def _extract_local_error_text(response: Any) -> str:
+        try:
+            payload = response.json()
+        except Exception:
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+
+        chunks: List[str] = []
+        for key in ("type", "code", "message", "detail"):
+            val = payload.get(key)
+            if val is not None:
+                chunks.append(str(val))
+
+        nested = payload.get("error")
+        if isinstance(nested, dict):
+            for key in ("type", "code", "message", "detail"):
+                val = nested.get(key)
+                if val is not None:
+                    chunks.append(str(val))
+
+        return " | ".join(part.strip() for part in chunks if str(part).strip()).lower()
+
+    @staticmethod
+    def _is_local_context_error_text(error_text: str) -> bool:
+        text = str(error_text or "").lower()
+        return (
+            "context_length_exceeded" in text
+            or ("maximum context length" in text and "requested" in text)
+            or ("too many tokens" in text)
+        )
+
+    @staticmethod
+    def _is_local_tools_unsupported_text(error_text: str) -> bool:
+        text = str(error_text or "").lower()
+        return (
+            ("tool" in text and ("unsupported" in text or "not supported" in text))
+            or ("invalid" in text and "tool_choice" in text)
+            or ("invalid" in text and "tools" in text)
+        )
+
+    @staticmethod
     def _is_local_model_not_found(response: Any) -> bool:
         """Best-effort detection of model-not-found payloads."""
         try:
@@ -590,6 +662,7 @@ class LLMClient:
             if (
                 nested_type == "model_not_found"
                 or nested_code == "model_not_found"
+                or ("invalid model" in nested_msg)
                 or ("model" in nested_msg and "not found" in nested_msg)
             ):
                 return True

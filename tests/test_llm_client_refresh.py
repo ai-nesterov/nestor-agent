@@ -313,3 +313,138 @@ class TestLlmClientRefresh(unittest.TestCase):
                 ("http://localhost:1234/v1/chat/completions", "Qwen/Qwen3.5-27B"),
             ],
         )
+
+    def test_local_chat_retries_with_shrunk_messages_on_context_error(self):
+        from ouroboros.llm import LLMClient
+
+        class _FakeResponse:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise RuntimeError(f"HTTP {self.status_code}")
+
+            def json(self):
+                return self._payload
+
+        class _FakeRequests:
+            calls = []
+
+            @staticmethod
+            def post(url, json=None, headers=None, timeout=None):
+                _FakeRequests.calls.append(dict(json or {}))
+                if len(_FakeRequests.calls) == 1:
+                    return _FakeResponse(
+                        400,
+                        {
+                            "error": {
+                                "code": "context_length_exceeded",
+                                "message": (
+                                    "This model's maximum context length is 8192 tokens. "
+                                    "However, you requested 12000 tokens (10000 in the messages, "
+                                    "2000 in the completion)."
+                                ),
+                            }
+                        },
+                    )
+                return _FakeResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "ok"}}],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    },
+                )
+
+        large_system = "A" * 12000
+        with patch.dict(sys.modules, {"requests": _FakeRequests}):
+            with patch.dict(
+                os.environ,
+                {"LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1"},
+                clear=False,
+            ):
+                client = LLMClient()
+                client._chat_local(
+                    messages=[
+                        {"role": "system", "content": large_system},
+                        {"role": "user", "content": "hi"},
+                    ],
+                    model="Qwen/Qwen3.5-27B",
+                    tools=None,
+                    max_tokens=2048,
+                    tool_choice="auto",
+                )
+
+        self.assertEqual(len(_FakeRequests.calls), 2)
+        first_system = _FakeRequests.calls[0]["messages"][0]["content"]
+        second_system = _FakeRequests.calls[1]["messages"][0]["content"]
+        self.assertGreater(len(first_system), len(second_system))
+        self.assertIn("[Context truncated to fit model window]", second_system)
+
+    def test_local_chat_retries_without_tools_when_backend_rejects_tool_payload(self):
+        from ouroboros.llm import LLMClient
+
+        class _FakeResponse:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise RuntimeError(f"HTTP {self.status_code}")
+
+            def json(self):
+                return self._payload
+
+        class _FakeRequests:
+            calls = []
+
+            @staticmethod
+            def post(url, json=None, headers=None, timeout=None):
+                _FakeRequests.calls.append(dict(json or {}))
+                if len(_FakeRequests.calls) == 1:
+                    return _FakeResponse(
+                        400,
+                        {"error": {"message": "tools are not supported for this model"}},
+                    )
+                return _FakeResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "ok"}}],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    },
+                )
+
+        with patch.dict(sys.modules, {"requests": _FakeRequests}):
+            with patch.dict(
+                os.environ,
+                {"LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1"},
+                clear=False,
+            ):
+                client = LLMClient()
+                client._chat_local(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="Qwen/Qwen3.5-27B",
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "echo",
+                                "description": "Echo text",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {"text": {"type": "string"}},
+                                    "required": ["text"],
+                                },
+                            },
+                        }
+                    ],
+                    max_tokens=64,
+                    tool_choice="auto",
+                )
+
+        self.assertEqual(len(_FakeRequests.calls), 2)
+        self.assertIn("tools", _FakeRequests.calls[0])
+        self.assertNotIn("tools", _FakeRequests.calls[1])
+        self.assertNotIn("tool_choice", _FakeRequests.calls[1])
