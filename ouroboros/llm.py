@@ -31,6 +31,10 @@ class LocalContextTooLargeError(RuntimeError):
     """Raised when a local model cannot fit context without silent truncation."""
 
 
+class LocalBackendUnavailableError(RuntimeError):
+    """Raised when local LLM backend is unreachable."""
+
+
 def _estimate_message_chars(messages: List[Dict[str, Any]]) -> int:
     total = 0
     for msg in messages:
@@ -483,6 +487,7 @@ class LLMClient:
         endpoint = f"{base_url}/chat/completions"
 
         last_exc: Optional[Exception] = None
+        last_conn_err: Optional[Exception] = None
         resp_dict: Dict[str, Any] = {}
         for attempt in range(3):
             try:
@@ -490,16 +495,25 @@ class LLMClient:
                 resp.raise_for_status()
                 resp_dict = resp.json()
                 last_exc = None
+                last_conn_err = None
                 break
             except Exception as exc:
                 last_exc = exc
+                if isinstance(exc, requests.exceptions.ConnectionError):
+                    last_conn_err = exc
                 err = str(exc)
                 if "context_length_exceeded" in err:
                     raise LocalContextTooLargeError(err) from exc
                 if attempt >= 2:
                     log.warning("Local model request failed: %s", exc)
-                    raise
+                    break
                 time.sleep(0.2)
+        if last_conn_err is not None:
+            raise LocalBackendUnavailableError(
+                "Local LLM backend is unreachable at "
+                f"{endpoint}. Start a local server on that address/port "
+                "or set LOCAL_MODEL_BASE_URL to a reachable OpenAI-compatible endpoint."
+            ) from last_conn_err
         if last_exc is not None:
             raise last_exc
 
