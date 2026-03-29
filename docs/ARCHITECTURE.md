@@ -203,9 +203,11 @@ Navigation is a left sidebar with 8 pages.
 
 ### 3.3 Settings
 
-- **API Keys**: OpenRouter (required), OpenAI (optional, for web search), Anthropic (optional).
+- **API Keys**: OpenRouter (required), OpenAI (optional, for web search), Anthropic (optional), Local model (optional).
   Keys are displayed as masked values (e.g., `sk-or-v1...`).
   Only overwritten on save if user enters a new value (not containing `...`).
+- **Provider Base URLs**: OpenRouter base URL and optional local OpenAI-compatible base URL.
+  Local base URL falls back to legacy `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` behavior when unset.
 - **Models**: Main, Code, Light, Fallback.
 - **Reasoning Effort**: Four separate dropdowns for task/chat, evolution, review, and consciousness.
   Backed by `OUROBOROS_EFFORT_TASK`, `OUROBOROS_EFFORT_EVOLUTION`, `OUROBOROS_EFFORT_REVIEW`,
@@ -505,6 +507,7 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 | Key | Default | Description |
 |-----|---------|-------------|
 | OPENROUTER_API_KEY | "" | Required. Main LLM API key |
+| OPENROUTER_BASE_URL | https://openrouter.ai/api/v1 | Base URL for OpenRouter-compatible cloud routing |
 | OPENAI_API_KEY | "" | Optional. For web_search tool |
 | ANTHROPIC_API_KEY | "" | Optional. For Claude Code CLI |
 | OUROBOROS_MODEL | anthropic/claude-opus-4.6 | Main reasoning model |
@@ -525,6 +528,8 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 | OUROBOROS_HARD_TIMEOUT_SEC | 1800 | Hard timeout kill (30 min) |
 | LOCAL_MODEL_SOURCE | "" | HuggingFace repo for local model |
 | LOCAL_MODEL_FILENAME | "" | GGUF filename within repo |
+| LOCAL_MODEL_BASE_URL | "" | Optional local OpenAI-compatible base URL (empty = legacy LOCAL_MODEL_PORT fallback) |
+| LOCAL_MODEL_API_KEY | "" | Optional bearer token for local OpenAI-compatible endpoints |
 | LOCAL_MODEL_CONTEXT_LENGTH | 16384 | Context window for local model |
 | LOCAL_MODEL_N_GPU_LAYERS | 0 | GPU layers (-1=all, 0=CPU/mmap) |
 | USE_LOCAL_MAIN | false | Route main model to local server |

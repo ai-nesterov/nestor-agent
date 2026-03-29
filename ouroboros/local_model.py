@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from ouroboros.compat import IS_MACOS, terminate_process_tree, kill_process_tree
+from ouroboros.config import resolve_local_model_api_key, resolve_local_model_base_url
 
 log = logging.getLogger(__name__)
 
@@ -337,8 +338,13 @@ class LocalModelManager:
         """Query the local server for health and model info."""
         import requests
 
-        url = f"http://127.0.0.1:{self._port}/v1/models"
-        resp = requests.get(url, timeout=5)
+        base_url = resolve_local_model_base_url(port=self._port)
+        headers: Dict[str, str] = {}
+        local_api_key = resolve_local_model_api_key().strip()
+        if local_api_key:
+            headers["Authorization"] = f"Bearer {local_api_key}"
+        url = f"{base_url}/models"
+        resp = requests.get(url, headers=headers, timeout=5)
         resp.raise_for_status()
         data = resp.json()
         models = data.get("data", [])
@@ -376,12 +382,13 @@ class LocalModelManager:
 
         Returns dict with: success, chat_ok, tool_call_ok, details, tokens_per_sec.
         """
-        from openai import OpenAI
+        import requests
 
-        client = OpenAI(
-            base_url=f"http://127.0.0.1:{self._port}/v1",
-            api_key="local",
-        )
+        base_url = resolve_local_model_base_url(port=self._port)
+        headers: Dict[str, str] = {}
+        local_api_key = resolve_local_model_api_key().strip()
+        if local_api_key:
+            headers["Authorization"] = f"Bearer {local_api_key}"
 
         result: Dict[str, Any] = {
             "success": False,
@@ -394,14 +401,23 @@ class LocalModelManager:
         # Test 1: basic chat
         try:
             t0 = time.time()
-            resp = client.chat.completions.create(
-                model="local-model",
-                messages=[{"role": "user", "content": "Say hello in one word."}],
-                max_tokens=32,
+            resp = requests.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": "local-model",
+                    "messages": [{"role": "user", "content": "Say hello in one word."}],
+                    "max_tokens": 32,
+                },
+                timeout=20,
             )
+            resp.raise_for_status()
+            data = resp.json()
             elapsed = time.time() - t0
-            text = (resp.choices[0].message.content or "") if resp.choices else ""
-            tokens = resp.usage.completion_tokens if resp.usage else len(text.split())
+            choices = data.get("choices") or []
+            text = ((choices[0] or {}).get("message") or {}).get("content", "") if choices else ""
+            usage = data.get("usage") or {}
+            tokens = int(usage.get("completion_tokens") or len(str(text).split()))
             result["chat_ok"] = bool(text.strip())
             if elapsed > 0 and tokens > 0:
                 result["tokens_per_sec"] = round(tokens / elapsed, 1)
@@ -419,21 +435,29 @@ class LocalModelManager:
                     "parameters": {"type": "object", "properties": {}},
                 },
             }]
-            resp = client.chat.completions.create(
-                model="local-model",
-                messages=[{"role": "user", "content": "What time is it? Use the get_time tool."}],
-                tools=tools,
-                tool_choice="auto",
-                max_tokens=256,
+            resp = requests.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": "local-model",
+                    "messages": [{"role": "user", "content": "What time is it? Use the get_time tool."}],
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "max_tokens": 256,
+                },
+                timeout=20,
             )
-            msg = resp.choices[0].message if resp.choices else None
-            tool_calls = list(getattr(msg, "tool_calls", None) or []) if msg else []
-            if msg and not tool_calls and getattr(msg, "content", None):
+            resp.raise_for_status()
+            data = resp.json()
+            choices = data.get("choices") or []
+            msg = ((choices[0] or {}).get("message") or {}) if choices else {}
+            tool_calls = list(msg.get("tool_calls") or [])
+            if msg and not tool_calls and msg.get("content"):
                 from ouroboros.llm import LLMClient
 
                 parsed = LLMClient._parse_tool_calls_from_content(
                     {
-                        "content": msg.content,
+                        "content": msg.get("content"),
                         "tool_calls": [],
                     },
                     {"get_time"},

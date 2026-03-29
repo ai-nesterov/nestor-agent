@@ -178,9 +178,18 @@ Created on first launch:
 | OpenRouter API Key | **Yes** | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | OpenAI API Key | No | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables web search tool |
 | Anthropic API Key | No | [console.anthropic.com](https://console.anthropic.com/settings/keys) — enables Claude Code CLI |
+| Local Model API Key | No | Optional bearer token for OpenAI-compatible local endpoints |
 | GitHub Token | No | [github.com/settings/tokens](https://github.com/settings/tokens) — enables remote sync |
 
 All keys are configured through the **Settings** page in the UI or during the first-run wizard.
+
+### Provider Endpoints
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL for OpenRouter-compatible cloud routing |
+| `LOCAL_MODEL_BASE_URL` | *(empty)* | If empty, falls back to legacy local URL: `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` |
+| `LOCAL_MODEL_API_KEY` | *(empty)* | If set, local requests send `Authorization: Bearer <LOCAL_MODEL_API_KEY>` |
 
 ### Default Models
 
@@ -195,7 +204,7 @@ All keys are configured through the **Settings** page in the UI or during the fi
 
 Task/chat reasoning defaults to `medium`.
 
-Models are configurable in the Settings page. All LLM calls go through [OpenRouter](https://openrouter.ai) (except web search, which uses OpenAI directly).
+Models are configurable in the Settings page. Cloud LLM calls use the configured OpenRouter-compatible base URL (default [OpenRouter](https://openrouter.ai)); web search still uses OpenAI directly.
 
 ---
 

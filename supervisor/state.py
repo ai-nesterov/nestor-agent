@@ -15,6 +15,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from ouroboros.config import resolve_openrouter_base_url
+
 log = logging.getLogger(__name__)
 
 
@@ -275,8 +277,9 @@ def check_openrouter_ground_truth() -> Optional[Dict[str, float]]:
         api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         if not api_key:
             return None
+        base_url = resolve_openrouter_base_url()
         req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/auth/key",
+            f"{base_url}/auth/key",
             headers={"Authorization": f"Bearer {api_key}"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

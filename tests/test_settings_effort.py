@@ -47,6 +47,13 @@ def test_effort_defaults_in_config():
     assert SETTINGS_DEFAULTS.get("OUROBOROS_EFFORT_CONSCIOUSNESS") == "low"
 
 
+def test_base_url_and_local_api_defaults_in_config():
+    """Provider/base-url defaults are present and backward-compatible."""
+    assert SETTINGS_DEFAULTS.get("OPENROUTER_BASE_URL") == "https://openrouter.ai/api/v1"
+    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL") == ""
+    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_API_KEY") == ""
+
+
 def test_review_models_default_in_config():
     """OUROBOROS_REVIEW_MODELS has a default value in config."""
     val = SETTINGS_DEFAULTS.get("OUROBOROS_REVIEW_MODELS", "")
@@ -155,4 +162,18 @@ def test_apply_settings_to_env_includes_effort_keys():
     for k in ("OUROBOROS_EFFORT_TASK", "OUROBOROS_EFFORT_EVOLUTION",
               "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
               "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT"):
+        os.environ.pop(k, None)
+
+
+def test_apply_settings_to_env_includes_new_base_url_keys():
+    settings = {
+        "OPENROUTER_BASE_URL": "https://proxy.example/api/v1",
+        "LOCAL_MODEL_BASE_URL": "http://localhost:9999/v1",
+        "LOCAL_MODEL_API_KEY": "local-key",
+    }
+    apply_settings_to_env(settings)
+    assert os.environ.get("OPENROUTER_BASE_URL") == "https://proxy.example/api/v1"
+    assert os.environ.get("LOCAL_MODEL_BASE_URL") == "http://localhost:9999/v1"
+    assert os.environ.get("LOCAL_MODEL_API_KEY") == "local-key"
+    for k in ("OPENROUTER_BASE_URL", "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY"):
         os.environ.pop(k, None)

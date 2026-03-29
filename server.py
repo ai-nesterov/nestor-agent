@@ -549,7 +549,7 @@ async def api_state(request: Request) -> JSONResponse:
 async def api_settings_get(request: Request) -> JSONResponse:
     settings = load_settings()
     safe = {k: v for k, v in settings.items()}
-    for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN"):
+    for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "LOCAL_MODEL_API_KEY"):
         if safe.get(key):
             safe[key] = safe[key][:8] + "..." if len(safe[key]) > 8 else "***"
     return JSONResponse(safe)

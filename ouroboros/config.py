@@ -32,6 +32,8 @@ PORT_FILE = DATA_DIR / "state" / "server_port"
 RESTART_EXIT_CODE = 42
 PANIC_EXIT_CODE = 99
 AGENT_SERVER_PORT = 8765
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LOCAL_MODEL_PORT = 8766
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ AGENT_SERVER_PORT = 8765
 # ---------------------------------------------------------------------------
 SETTINGS_DEFAULTS = {
     "OPENROUTER_API_KEY": "",
+    "OPENROUTER_BASE_URL": DEFAULT_OPENROUTER_BASE_URL,
     "OPENAI_API_KEY": "",
     "ANTHROPIC_API_KEY": "",
     "OUROBOROS_MODEL": "anthropic/claude-opus-4.6",
@@ -71,7 +74,9 @@ SETTINGS_DEFAULTS = {
     # Local model (llama-cpp-python server)
     "LOCAL_MODEL_SOURCE": "",
     "LOCAL_MODEL_FILENAME": "",
-    "LOCAL_MODEL_PORT": 8766,
+    "LOCAL_MODEL_PORT": DEFAULT_LOCAL_MODEL_PORT,
+    "LOCAL_MODEL_BASE_URL": "",
+    "LOCAL_MODEL_API_KEY": "",
     "LOCAL_MODEL_N_GPU_LAYERS": 0,
     "LOCAL_MODEL_CONTEXT_LENGTH": 16384,
     "LOCAL_MODEL_CHAT_FORMAT": "",
@@ -118,6 +123,34 @@ def get_review_enforcement() -> str:
     default_val = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_ENFORCEMENT"])
     raw = (os.environ.get("OUROBOROS_REVIEW_ENFORCEMENT", default_val) or default_val).strip().lower()
     return raw if raw in {"advisory", "blocking"} else default_val
+
+
+def resolve_openrouter_base_url(base_url: Optional[str] = None) -> str:
+    """Resolve OpenRouter base URL from arg -> env -> defaults."""
+    if base_url is not None and str(base_url).strip():
+        return str(base_url).strip().rstrip("/")
+    env_val = os.environ.get("OPENROUTER_BASE_URL", "")
+    if env_val.strip():
+        return env_val.strip().rstrip("/")
+    return str(DEFAULT_OPENROUTER_BASE_URL).rstrip("/")
+
+
+def resolve_local_model_base_url(base_url: Optional[str] = None, port: Optional[int] = None) -> str:
+    """Resolve local model OpenAI-compatible base URL with legacy fallback."""
+    if base_url is not None and str(base_url).strip():
+        return str(base_url).strip().rstrip("/")
+    env_val = os.environ.get("LOCAL_MODEL_BASE_URL", "")
+    if env_val.strip():
+        return env_val.strip().rstrip("/")
+    resolved_port = int(port or os.environ.get("LOCAL_MODEL_PORT", str(DEFAULT_LOCAL_MODEL_PORT)))
+    return f"http://127.0.0.1:{resolved_port}/v1"
+
+
+def resolve_local_model_api_key(api_key: Optional[str] = None) -> str:
+    """Resolve local model API key from arg -> env."""
+    if api_key is not None:
+        return str(api_key)
+    return str(os.environ.get("LOCAL_MODEL_API_KEY", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +237,7 @@ def save_settings(settings: dict) -> None:
 def apply_settings_to_env(settings: dict) -> None:
     """Push settings into environment variables for supervisor modules."""
     env_keys = [
-        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
         "OUROBOROS_MODEL", "OUROBOROS_MODEL_CODE", "OUROBOROS_MODEL_LIGHT",
         "OUROBOROS_MODEL_FALLBACK", "CLAUDE_CODE_MODEL",
         "TOTAL_BUDGET", "GITHUB_TOKEN", "GITHUB_REPO",
@@ -215,6 +248,7 @@ def apply_settings_to_env(settings: dict) -> None:
         "OUROBOROS_EFFORT_TASK", "OUROBOROS_EFFORT_EVOLUTION",
         "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
         "LOCAL_MODEL_SOURCE", "LOCAL_MODEL_FILENAME",
+        "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY",
         "LOCAL_MODEL_PORT", "LOCAL_MODEL_N_GPU_LAYERS", "LOCAL_MODEL_CONTEXT_LENGTH",
         "LOCAL_MODEL_CHAT_FORMAT",
         "USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK",

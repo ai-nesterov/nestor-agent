@@ -15,6 +15,12 @@ import time
 import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from ouroboros.config import (
+    resolve_local_model_api_key,
+    resolve_local_model_base_url,
+    resolve_openrouter_base_url,
+)
+
 log = logging.getLogger(__name__)
 
 DEFAULT_LIGHT_MODEL = "anthropic/claude-sonnet-4.6"
@@ -163,7 +169,7 @@ def fetch_openrouter_pricing() -> Dict[str, Tuple[float, float, float]]:
         return {}
 
     try:
-        url = "https://openrouter.ai/api/v1/models"
+        url = f"{resolve_openrouter_base_url()}/models"
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
 
@@ -218,27 +224,36 @@ class LLMClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://openrouter.ai/api/v1",
+        base_url: Optional[str] = None,
     ):
         self._api_key_override = api_key
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url = base_url
+        self._base_url_override = base_url
+        self._base_url = resolve_openrouter_base_url(base_url)
         self._client = None
         self._client_api_key: Optional[str] = None
+        self._client_base_url: Optional[str] = None
         self._async_client = None
         self._async_client_api_key: Optional[str] = None
-        self._local_client = None
-        self._local_port: Optional[int] = None
+        self._async_client_base_url: Optional[str] = None
+
+    def _resolve_openrouter_base_url(self) -> str:
+        return resolve_openrouter_base_url(self._base_url_override)
 
     def _get_client(self):
         current_api_key = self._api_key_override
         if current_api_key is None:
             current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        current_base_url = self._resolve_openrouter_base_url()
 
-        if self._client is None or self._client_api_key != current_api_key:
+        if (
+            self._client is None
+            or self._client_api_key != current_api_key
+            or self._client_base_url != current_base_url
+        ):
             from openai import OpenAI
             self._client = OpenAI(
-                base_url=self._base_url,
+                base_url=current_base_url,
                 api_key=current_api_key,
                 max_retries=0,
                 default_headers={
@@ -247,30 +262,25 @@ class LLMClient:
                 },
             )
             self._client_api_key = current_api_key
+            self._client_base_url = current_base_url
             self._api_key = current_api_key
+            self._base_url = current_base_url
         return self._client
-
-    def _get_local_client(self):
-        port = int(os.environ.get("LOCAL_MODEL_PORT", "8766"))
-        if self._local_client is None or self._local_port != port:
-            from openai import OpenAI
-            self._local_client = OpenAI(
-                base_url=f"http://127.0.0.1:{port}/v1",
-                api_key="local",
-                max_retries=0,
-            )
-            self._local_port = port
-        return self._local_client
 
     def _get_async_client(self):
         current_api_key = self._api_key_override
         if current_api_key is None:
             current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        current_base_url = self._resolve_openrouter_base_url()
 
-        if self._async_client is None or self._async_client_api_key != current_api_key:
+        if (
+            self._async_client is None
+            or self._async_client_api_key != current_api_key
+            or self._async_client_base_url != current_base_url
+        ):
             from openai import AsyncOpenAI
             self._async_client = AsyncOpenAI(
-                base_url=self._base_url,
+                base_url=current_base_url,
                 api_key=current_api_key,
                 max_retries=0,
                 default_headers={
@@ -279,6 +289,7 @@ class LLMClient:
                 },
             )
             self._async_client_api_key = current_api_key
+            self._async_client_base_url = current_base_url
         return self._async_client
 
     @staticmethod
@@ -298,7 +309,7 @@ class LLMClient:
         """Fetch cost from OpenRouter Generation API as fallback."""
         try:
             import requests
-            url = f"{self._base_url.rstrip('/')}/generation?id={generation_id}"
+            url = f"{self._resolve_openrouter_base_url()}/generation?id={generation_id}"
             resp = requests.get(url, headers={"Authorization": f"Bearer {self._api_key}"}, timeout=5)
             if resp.status_code == 200:
                 data = resp.json().get("data") or {}
@@ -408,7 +419,7 @@ class LLMClient:
         tool_choice: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Send a chat request to the local llama-cpp-python server."""
-        client = self._get_local_client()
+        import requests
 
         clean_messages = self._strip_cache_control(messages)
         # Flatten multipart content blocks to plain strings (local server doesn't support arrays)
@@ -448,11 +459,20 @@ class LLMClient:
         if clean_tools:
             kwargs["tools"] = clean_tools
             kwargs["tool_choice"] = tool_choice
+        headers: Dict[str, str] = {}
+        local_api_key = resolve_local_model_api_key().strip()
+        if local_api_key:
+            headers["Authorization"] = f"Bearer {local_api_key}"
+        base_url = resolve_local_model_base_url()
+        endpoint = f"{base_url}/chat/completions"
 
         last_exc: Optional[Exception] = None
+        resp_dict: Dict[str, Any] = {}
         for attempt in range(3):
             try:
-                resp = client.chat.completions.create(**kwargs)
+                resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
+                resp.raise_for_status()
+                resp_dict = resp.json()
                 last_exc = None
                 break
             except Exception as exc:
@@ -460,12 +480,13 @@ class LLMClient:
                 err = str(exc)
                 if "context_length_exceeded" in err:
                     raise LocalContextTooLargeError(err) from exc
-                log.warning("Local model request failed: %s", exc)
-                raise
+                if attempt >= 2:
+                    log.warning("Local model request failed: %s", exc)
+                    raise
+                time.sleep(0.2)
         if last_exc is not None:
             raise last_exc
 
-        resp_dict = resp.model_dump()
         usage = resp_dict.get("usage") or {}
         choices = resp_dict.get("choices") or [{}]
         msg = (choices[0] if choices else {}).get("message") or {}
