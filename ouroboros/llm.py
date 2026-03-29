@@ -346,7 +346,22 @@ class LLMClient:
         When use_local=True, routes to the local llama-cpp-python server
         and strips OpenRouter-specific parameters (reasoning, provider, cache_control).
         """
-        if use_local:
+        current_api_key = self._api_key_override
+        if current_api_key is None:
+            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        should_fallback_to_local = (
+            not use_local
+            and not str(current_api_key or "").strip()
+            and has_local_model_config()
+        )
+
+        if use_local or should_fallback_to_local:
+            if should_fallback_to_local:
+                log.info(
+                    "OPENROUTER_API_KEY is not set; routing chat() call to local backend "
+                    "for model '%s'",
+                    model,
+                )
             return self._chat_local(messages, tools, max_tokens, tool_choice)
 
         return self._chat_openrouter(messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature)
