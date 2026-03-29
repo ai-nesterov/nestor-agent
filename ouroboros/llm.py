@@ -445,6 +445,30 @@ class LLMClient:
             f"({compacted_chars} chars > target {target_chars})."
         )
 
+    @staticmethod
+    def _normalize_local_message_order(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure backend-compatible ordering: all system messages first."""
+        system_msgs: List[Dict[str, Any]] = []
+        other_msgs: List[Dict[str, Any]] = []
+        seen_non_system = False
+        had_late_system = False
+
+        for msg in messages:
+            if str(msg.get("role", "")).strip() == "system":
+                system_msgs.append(msg)
+                if seen_non_system:
+                    had_late_system = True
+            else:
+                seen_non_system = True
+                other_msgs.append(msg)
+
+        if had_late_system:
+            log.info(
+                "Reordered local chat payload: moved %d late system message(s) to the beginning",
+                len(system_msgs),
+            )
+        return system_msgs + other_msgs
+
     def _chat_local(
         self,
         messages: List[Dict[str, Any]],
@@ -478,6 +502,7 @@ class LLMClient:
                     b.get("text", "") for b in content
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
+        clean_messages = self._normalize_local_message_order(clean_messages)
 
         clean_tools = None
         if tools:

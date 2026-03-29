@@ -448,3 +448,50 @@ class TestLlmClientRefresh(unittest.TestCase):
         self.assertIn("tools", _FakeRequests.calls[0])
         self.assertNotIn("tools", _FakeRequests.calls[1])
         self.assertNotIn("tool_choice", _FakeRequests.calls[1])
+
+    def test_local_chat_reorders_late_system_messages_to_front(self):
+        from ouroboros.llm import LLMClient
+
+        class _FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "choices": [{"message": {"content": "ok"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+
+        class _FakeRequests:
+            last_payload = None
+
+            @staticmethod
+            def post(url, json=None, headers=None, timeout=None):
+                _FakeRequests.last_payload = dict(json or {})
+                return _FakeResponse()
+
+        with patch.dict(sys.modules, {"requests": _FakeRequests}):
+            with patch.dict(
+                os.environ,
+                {"LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1"},
+                clear=False,
+            ):
+                client = LLMClient()
+                client._chat_local(
+                    messages=[
+                        {"role": "system", "content": "global"},
+                        {"role": "user", "content": "u1"},
+                        {"role": "assistant", "content": "a1"},
+                        {"role": "system", "content": "late-system"},
+                        {"role": "user", "content": "u2"},
+                    ],
+                    model="Qwen/Qwen3.5-27B",
+                    tools=None,
+                    max_tokens=64,
+                    tool_choice="auto",
+                )
+
+        roles = [m.get("role") for m in (_FakeRequests.last_payload or {}).get("messages", [])]
+        self.assertEqual(roles, ["system", "system", "user", "assistant", "user"])
