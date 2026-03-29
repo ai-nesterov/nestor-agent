@@ -733,6 +733,8 @@ a { color:#e85d6f; }
   <label>OpenAI API Key <span class="opt">— for web search</span></label>
   <input id="openai-key" type="password" placeholder="sk-...">
   <p class="hint">Enables the web_search tool. <a href="https://platform.openai.com/api-keys" target="_blank">Get key</a></p>
+  <label>Local Model API Key <span class="opt">— optional, for protected local endpoints</span></label>
+  <input id="local-api-key" type="password" placeholder="sk-local-...">
 
   <h3>Local Model (optional)</h3>
   <label>Preset</label>
@@ -784,6 +786,8 @@ btn.addEventListener('click', async () => {
     if (orKey.length >= 10) data.OPENROUTER_API_KEY = orKey;
     const oaiKey = document.getElementById('openai-key').value.trim();
     if (oaiKey.length >= 10) data.OPENAI_API_KEY = oaiKey;
+    const localApiKey = document.getElementById('local-api-key').value.trim();
+    if (localApiKey.length > 0) data.LOCAL_MODEL_API_KEY = localApiKey;
     const p = preset.value;
     const defaultGpuLayers = navigator.platform.startsWith('Mac') ? -1 : 0;
     if (p && p !== 'custom' && PRESETS[p]) {
