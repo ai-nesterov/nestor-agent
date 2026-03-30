@@ -151,11 +151,6 @@ export function initSettings({ ws, state }) {
                     <div class="form-field"><label>Codex Daily Cap</label><input id="s-codex-cap" type="number" value="5" style="width:100px"></div>
                     <div class="form-field"><label>Codex Parallel</label><input id="s-codex-parallel" type="number" value="1" style="width:100px"></div>
                 </div>
-                <div class="form-row" style="align-items:center;gap:8px;margin-top:8px">
-                    <button class="btn btn-default" id="btn-refresh-executor-status">Refresh Live Limits</button>
-                    <span style="font-size:12px;color:var(--text-secondary)">Shows real CLI auth/status plus configured daily caps. 5h/week provider quotas are marked explicitly if CLI does not expose them.</span>
-                </div>
-                <pre id="executor-live-status" style="margin-top:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;line-height:1.45;white-space:pre-wrap;color:var(--text-primary)">Loading executor status...</pre>
             </div>
             <div class="divider"></div>
             <div class="form-section">
@@ -270,34 +265,6 @@ export function initSettings({ ws, state }) {
 
     loadSettings().catch(() => {});
 
-    async function loadExecutorStatus() {
-        const el = document.getElementById('executor-live-status');
-        if (!el) return;
-        el.textContent = 'Loading executor status...';
-        try {
-            const resp = await fetch('/api/executor/status', { cache: 'no-store' });
-            const data = await resp.json().catch(() => ({}));
-            if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-            const codex = data.codex || {};
-            const claude = data.claude || {};
-            const provider = data.provider_window_limits || {};
-            const lines = [
-                `Budget mode: ${data.external_budget_mode || 'normal'} | deferred tasks: ${data.deferred_tasks_count || 0}`,
-                '',
-                `Codex: logged_in=${Boolean(codex.logged_in)} auth=${codex.auth_method || 'unknown'} daily=${codex.daily_used || 0}/${codex.daily_cap || 0} remaining=${codex.daily_remaining || 0}`,
-                `Claude: logged_in=${Boolean(claude.logged_in)} auth=${claude.auth_method || 'unknown'} sub=${claude.subscription_type || 'unknown'} daily=${claude.daily_used || 0}/${claude.daily_cap || 0} remaining=${claude.daily_remaining || 0}`,
-                '',
-                `Provider 5h remaining: ${provider.five_hour_remaining == null ? 'N/A (not exposed by CLI)' : provider.five_hour_remaining}`,
-                `Provider weekly remaining: ${provider.weekly_remaining == null ? 'N/A (not exposed by CLI)' : provider.weekly_remaining}`,
-                provider.note ? `Note: ${provider.note}` : '',
-            ].filter(Boolean);
-            el.textContent = lines.join('\n');
-        } catch (e) {
-            el.textContent = `Failed to load executor status: ${e.message}`;
-        }
-    }
-
-    loadExecutorStatus().catch(() => {});
 
     let localStatusInterval = null;
     function updateLocalStatus() {
@@ -374,9 +341,6 @@ export function initSettings({ ws, state }) {
         } catch (e) { el.textContent = 'Test failed: ' + e.message; el.style.color = 'var(--red)'; }
     });
 
-    document.getElementById('btn-refresh-executor-status').addEventListener('click', async () => {
-        await loadExecutorStatus();
-    });
 
     document.getElementById('btn-save-settings').addEventListener('click', async () => {
         const body = {
@@ -446,7 +410,6 @@ export function initSettings({ ws, state }) {
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
             await loadSettings();
-            await loadExecutorStatus();
             const status = document.getElementById('settings-status');
             status.textContent = data.warnings && data.warnings.length
                 ? ('Settings saved with warnings: ' + data.warnings.join(' | '))

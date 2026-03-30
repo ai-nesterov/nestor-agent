@@ -30,12 +30,6 @@ export function initDashboard({ ws, state }) {
                 </div>
             </div>
             <div class="divider"></div>
-            <div class="section-title">External Limits</div>
-            <div class="stat-card" style="margin-bottom:14px">
-                <div class="label">Live Worker Limits</div>
-                <pre id="dash-executor-status" style="margin:8px 0 0 0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;line-height:1.45;white-space:pre-wrap;color:var(--text-primary)">Loading...</pre>
-            </div>
-            <div class="divider"></div>
             <div class="section-title">Controls</div>
             <div class="controls-row">
                 <div class="toggle-wrapper">
@@ -104,31 +98,6 @@ export function initDashboard({ ws, state }) {
         } catch {}
     }
 
-    async function updateExecutorStatus() {
-        try {
-            const resp = await fetch('/api/executor/status', { cache: 'no-store' });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-            const codex = data.codex || {};
-            const claude = data.claude || {};
-            const provider = data.provider_window_limits || {};
-            const lines = [
-                `Budget mode: ${data.external_budget_mode || 'normal'} | deferred: ${data.deferred_tasks_count || 0}`,
-                '',
-                `Codex: logged_in=${Boolean(codex.logged_in)} auth=${codex.auth_method || 'unknown'} daily=${codex.daily_used || 0}/${codex.daily_cap || 0} remaining=${codex.daily_remaining || 0}`,
-                `Claude: logged_in=${Boolean(claude.logged_in)} auth=${claude.auth_method || 'unknown'} sub=${claude.subscription_type || 'unknown'} daily=${claude.daily_used || 0}/${claude.daily_cap || 0} remaining=${claude.daily_remaining || 0}`,
-                '',
-                `Provider 5h remaining: ${provider.five_hour_remaining == null ? 'N/A (not exposed by CLI)' : provider.five_hour_remaining}`,
-                `Provider weekly remaining: ${provider.weekly_remaining == null ? 'N/A (not exposed by CLI)' : provider.weekly_remaining}`,
-            ];
-            document.getElementById('dash-executor-status').textContent = lines.join('\n');
-        } catch (e) {
-            document.getElementById('dash-executor-status').textContent = `Failed to load executor status: ${e.message}`;
-        }
-    }
-
     updateDashboard();
-    updateExecutorStatus();
     setInterval(updateDashboard, 3000);
-    setInterval(updateExecutorStatus, 10000);
 }
