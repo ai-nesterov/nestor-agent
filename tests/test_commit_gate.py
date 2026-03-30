@@ -97,6 +97,7 @@ def test_also_stage_in_repo_write_commit():
     git_mod = _get_git_module()
     sig = inspect.signature(git_mod._repo_write_commit)
     assert "also_stage" in sig.parameters
+    assert "review_executor" in sig.parameters
 
 
 def test_also_stage_in_schema():
@@ -106,6 +107,7 @@ def test_also_stage_in_schema():
     props = rwc.schema["parameters"]["properties"]
     assert "also_stage" in props
     assert props["also_stage"]["type"] == "array"
+    assert props["review_executor"]["default"] == "cloud"
 
 
 # --- Auto-tagging ---

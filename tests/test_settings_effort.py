@@ -6,6 +6,7 @@ from ouroboros.config import (
     resolve_effort,
     get_review_models,
     get_review_enforcement,
+    get_review_executor,
     has_openrouter_config,
     has_local_model_config,
     has_configured_llm_backend,
@@ -54,7 +55,8 @@ def test_effort_defaults_in_config():
 def test_base_url_and_local_api_defaults_in_config():
     """Provider/base-url defaults are present and backward-compatible."""
     assert SETTINGS_DEFAULTS.get("OPENROUTER_BASE_URL") == "https://openrouter.ai/api/v1"
-    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL") == ""
+    assert isinstance(SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL"), str)
+    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL", "").endswith("/v1")
     assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_API_KEY") == ""
 
 
@@ -69,6 +71,11 @@ def test_review_models_default_in_config():
 def test_review_enforcement_default_in_config():
     """OUROBOROS_REVIEW_ENFORCEMENT defaults to advisory."""
     assert SETTINGS_DEFAULTS.get("OUROBOROS_REVIEW_ENFORCEMENT") == "advisory"
+
+
+def test_review_executor_default_in_config():
+    """OUROBOROS_REVIEW_EXECUTOR defaults to cloud for backward compatibility."""
+    assert SETTINGS_DEFAULTS.get("OUROBOROS_REVIEW_EXECUTOR") == "cloud"
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +127,22 @@ def test_get_review_enforcement_invalid_falls_back(monkeypatch):
     assert get_review_enforcement() == "advisory"
 
 
+def test_get_review_executor_default(monkeypatch):
+    monkeypatch.delenv("OUROBOROS_REVIEW_EXECUTOR", raising=False)
+    assert get_review_executor() == "cloud"
+
+
+def test_get_review_executor_custom(monkeypatch):
+    for value in ("cloud", "codex", "claude_code", "both"):
+        monkeypatch.setenv("OUROBOROS_REVIEW_EXECUTOR", value)
+        assert get_review_executor() == value
+
+
+def test_get_review_executor_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("OUROBOROS_REVIEW_EXECUTOR", "nope")
+    assert get_review_executor() == "cloud"
+
+
 def test_apply_settings_clears_review_models_restores_default(monkeypatch):
     """Clearing OUROBOROS_REVIEW_MODELS in settings restores the default in env."""
     # Simulate user clearing the field in Settings UI (empty string)
@@ -141,6 +164,14 @@ def test_apply_settings_clears_review_enforcement_restores_default(monkeypatch):
     assert get_review_enforcement() == "advisory"
 
 
+def test_apply_settings_clears_review_executor_restores_default(monkeypatch):
+    settings = {"OUROBOROS_REVIEW_EXECUTOR": ""}
+    apply_settings_to_env(settings)
+    env_val = os.environ.get("OUROBOROS_REVIEW_EXECUTOR", "")
+    assert env_val == SETTINGS_DEFAULTS["OUROBOROS_REVIEW_EXECUTOR"]
+    assert get_review_executor() == "cloud"
+
+
 # ---------------------------------------------------------------------------
 # apply_settings_to_env propagation
 # ---------------------------------------------------------------------------
@@ -154,6 +185,7 @@ def test_apply_settings_to_env_includes_effort_keys():
         "OUROBOROS_EFFORT_CONSCIOUSNESS": "none",
         "OUROBOROS_REVIEW_MODELS": "model-a,model-b",
         "OUROBOROS_REVIEW_ENFORCEMENT": "advisory",
+        "OUROBOROS_REVIEW_EXECUTOR": "both",
     }
     apply_settings_to_env(settings)
     assert os.environ.get("OUROBOROS_EFFORT_TASK") == "low"
@@ -162,10 +194,12 @@ def test_apply_settings_to_env_includes_effort_keys():
     assert os.environ.get("OUROBOROS_EFFORT_CONSCIOUSNESS") == "none"
     assert os.environ.get("OUROBOROS_REVIEW_MODELS") == "model-a,model-b"
     assert os.environ.get("OUROBOROS_REVIEW_ENFORCEMENT") == "advisory"
+    assert os.environ.get("OUROBOROS_REVIEW_EXECUTOR") == "both"
     # cleanup
     for k in ("OUROBOROS_EFFORT_TASK", "OUROBOROS_EFFORT_EVOLUTION",
               "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
-              "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT"):
+              "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT",
+              "OUROBOROS_REVIEW_EXECUTOR"):
         os.environ.pop(k, None)
 
 

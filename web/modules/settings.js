@@ -131,6 +131,16 @@ export function initSettings({ ws, state }) {
                         </select>
                         <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Review always runs. Advisory surfaces warnings but allows commit; Blocking preserves the current hard gate.</div>
                     </div>
+                    <div class="form-field">
+                        <label>Review Executor</label>
+                        <select id="s-review-executor" style="width:180px">
+                            <option value="cloud">Cloud</option>
+                            <option value="codex">Codex</option>
+                            <option value="claude_code">Claude Code</option>
+                            <option value="both">Both Local CLIs</option>
+                        </select>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Choose cloud review, a single local CLI reviewer, or run both local CLIs in isolated read-only worktrees.</div>
+                    </div>
                 </div>
             </div>
             <div class="divider"></div>
@@ -231,6 +241,7 @@ export function initSettings({ ws, state }) {
         document.getElementById('s-effort-consciousness').value = s.OUROBOROS_EFFORT_CONSCIOUSNESS || 'low';
         if (s.OUROBOROS_REVIEW_MODELS) document.getElementById('s-review-models').value = s.OUROBOROS_REVIEW_MODELS;
         document.getElementById('s-review-enforcement').value = s.OUROBOROS_REVIEW_ENFORCEMENT || 'advisory';
+        document.getElementById('s-review-executor').value = s.OUROBOROS_REVIEW_EXECUTOR || 'cloud';
         if (s.OUROBOROS_MAX_WORKERS) document.getElementById('s-workers').value = s.OUROBOROS_MAX_WORKERS;
         if (s.TOTAL_BUDGET) document.getElementById('s-budget').value = s.TOTAL_BUDGET;
         if (s.OUROBOROS_SOFT_TIMEOUT_SEC) document.getElementById('s-soft-timeout').value = s.OUROBOROS_SOFT_TIMEOUT_SEC;
@@ -365,6 +376,7 @@ export function initSettings({ ws, state }) {
             OUROBOROS_EFFORT_CONSCIOUSNESS: document.getElementById('s-effort-consciousness').value,
             OUROBOROS_REVIEW_MODELS: document.getElementById('s-review-models').value.trim(),
             OUROBOROS_REVIEW_ENFORCEMENT: document.getElementById('s-review-enforcement').value,
+            OUROBOROS_REVIEW_EXECUTOR: document.getElementById('s-review-executor').value,
             OUROBOROS_MAX_WORKERS: parseInt(document.getElementById('s-workers').value) || 5,
             TOTAL_BUDGET: parseFloat(document.getElementById('s-budget').value) || 10,
             OUROBOROS_SOFT_TIMEOUT_SEC: parseInt(document.getElementById('s-soft-timeout').value) || 600,

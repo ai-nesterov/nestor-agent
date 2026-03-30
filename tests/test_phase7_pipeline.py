@@ -93,6 +93,7 @@ class TestRepoWriteRegistration:
         rc = next(t for t in tools if t.name == "repo_commit")
         props = rc.schema["parameters"]["properties"]
         assert "review_rebuttal" in props
+        assert "review_executor" in props
 
 
 # --- repo_write behavioral tests ---

@@ -17,7 +17,9 @@ out_path = _arg_value("-o")
 if out_path:
     out = pathlib.Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if os.environ.get("FAKE_CODEX_SCHEMA_INVALID") == "1":
+    if os.environ.get("FAKE_CODEX_REVIEW"):
+        payload = {"review": os.environ["FAKE_CODEX_REVIEW"]}
+    elif os.environ.get("FAKE_CODEX_SCHEMA_INVALID") == "1":
         payload = {"summary": "oops"}
     else:
         payload = {

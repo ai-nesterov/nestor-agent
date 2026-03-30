@@ -83,6 +83,8 @@ SETTINGS_DEFAULTS = {
     "OUROBOROS_REVIEW_MODELS": "openai/gpt-5.4,google/gemini-3.1-pro-preview,anthropic/claude-opus-4.6",
     # Pre-commit review enforcement: advisory | blocking
     "OUROBOROS_REVIEW_ENFORCEMENT": "advisory",
+    # Pre-commit review backend: cloud | codex | claude_code | both
+    "OUROBOROS_REVIEW_EXECUTOR": "cloud",
     # Reasoning effort per task type: none | low | medium | high
     # OUROBOROS_INITIAL_REASONING_EFFORT remains a legacy alias for task/chat.
     "OUROBOROS_EFFORT_TASK": "medium",
@@ -207,6 +209,13 @@ def get_review_enforcement() -> str:
     default_val = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_ENFORCEMENT"])
     raw = (os.environ.get("OUROBOROS_REVIEW_ENFORCEMENT", default_val) or default_val).strip().lower()
     return raw if raw in {"advisory", "blocking"} else default_val
+
+
+def get_review_executor() -> str:
+    """Return the configured pre-commit review executor."""
+    default_val = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_EXECUTOR"])
+    raw = (os.environ.get("OUROBOROS_REVIEW_EXECUTOR", default_val) or default_val).strip().lower()
+    return raw if raw in {"cloud", "codex", "claude_code", "both"} else default_val
 
 
 def resolve_openrouter_base_url(base_url: Optional[str] = None) -> str:
@@ -336,7 +345,7 @@ def apply_settings_to_env(settings: dict) -> None:
         "OUROBOROS_TOOL_TIMEOUT_SEC",
         "OUROBOROS_BG_MAX_ROUNDS", "OUROBOROS_BG_WAKEUP_MIN", "OUROBOROS_BG_WAKEUP_MAX",
         "OUROBOROS_EVO_COST_THRESHOLD", "OUROBOROS_WEBSEARCH_MODEL",
-        "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT",
+        "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT", "OUROBOROS_REVIEW_EXECUTOR",
         "OUROBOROS_EFFORT_TASK", "OUROBOROS_EFFORT_EVOLUTION",
         "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
         "EXTERNAL_EXECUTORS_ENABLED", "CLAUDE_CODE_ENABLED", "CODEX_ENABLED",
@@ -363,6 +372,8 @@ def apply_settings_to_env(settings: dict) -> None:
         os.environ["OUROBOROS_REVIEW_MODELS"] = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_MODELS"])
     if not os.environ.get("OUROBOROS_REVIEW_ENFORCEMENT"):
         os.environ["OUROBOROS_REVIEW_ENFORCEMENT"] = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_ENFORCEMENT"])
+    if not os.environ.get("OUROBOROS_REVIEW_EXECUTOR"):
+        os.environ["OUROBOROS_REVIEW_EXECUTOR"] = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_EXECUTOR"])
 
 
 # ---------------------------------------------------------------------------

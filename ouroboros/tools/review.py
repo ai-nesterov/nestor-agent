@@ -12,7 +12,10 @@ import json
 import asyncio
 import logging
 import pathlib
-from typing import List, Optional
+import shutil
+import subprocess
+import uuid
+from typing import Dict, List, Optional
 
 from ouroboros.llm import LLMClient
 from ouroboros.utils import utc_now_iso, run_cmd, append_jsonl
@@ -23,6 +26,7 @@ log = logging.getLogger(__name__)
 
 MAX_MODELS = 10
 CONCURRENCY_LIMIT = 5
+_LOCAL_REVIEW_EXECUTORS = frozenset({"codex", "claude_code"})
 
 _CONSTITUTIONAL_PREAMBLE = """\
 ## CONSTITUTIONAL CONTEXT — TOP PRIORITY
@@ -294,6 +298,350 @@ def _emit_usage_event(review_result: dict, ctx: ToolContext) -> None:
                 ctx.pending_events.append(usage_event)
     elif hasattr(ctx, "pending_events"):
         ctx.pending_events.append(usage_event)
+
+
+def _normalize_review_executor(review_executor: str = "") -> str:
+    raw = str(review_executor or "").strip().lower()
+    if not raw:
+        return _cfg.get_review_executor()
+    if raw in {"cloud", "codex", "claude_code", "both"}:
+        return raw
+    return _cfg.get_review_executor()
+
+
+def _review_targets_for_executor(review_executor: str) -> List[str]:
+    normalized = _normalize_review_executor(review_executor)
+    if normalized == "both":
+        return ["codex", "claude_code"]
+    return [normalized]
+
+
+def _required_successful_reviews(review_executor: str, reviewer_count: int) -> int:
+    normalized = _normalize_review_executor(review_executor)
+    if normalized in _LOCAL_REVIEW_EXECUTORS:
+        return 1
+    return min(2, max(1, reviewer_count))
+
+
+def _extract_last_json_object(text: str) -> Optional[Dict[str, object]]:
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    for candidate in reversed(lines):
+        if candidate.startswith("{") and candidate.endswith("}"):
+            try:
+                payload = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                return payload
+    try:
+        payload = json.loads(str(text or "").strip())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _extract_review_text(raw_text: str, payload: Optional[Dict[str, object]] = None) -> str:
+    if isinstance(payload, dict):
+        for key in ("review", "result", "content", "summary", "text"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return str(raw_text or "").strip()
+
+
+def _snapshot_worktree_status(worktree_path: pathlib.Path) -> str:
+    return run_cmd(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=worktree_path,
+    )
+
+
+def _prepare_codex_review_config(worktree_path: pathlib.Path, model: str) -> None:
+    cfg_dir = worktree_path / ".codex"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.toml").write_text(
+        "\n".join(
+            [
+                f'model = "{model}"',
+                'approval_policy = "never"',
+                'sandbox_mode = "read-only"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _run_codex_cli_review(prompt: str, worktree_path: pathlib.Path) -> dict:
+    cli_bin = "codex"
+    if not shutil.which(cli_bin):
+        return {
+            "model": f"codex:{os.environ.get('CODEX_MODEL') or 'gpt-5.4'}",
+            "verdict": "ERROR",
+            "text": f"{cli_bin} not found in PATH",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    env = os.environ.copy()
+    auth_mode = str(os.environ.get("CODEX_AUTH_MODE") or "subscription_only").strip()
+    api_key = str(env.get("CODEX_API_KEY") or "").strip()
+    if auth_mode == "subscription_only" and api_key:
+        return {
+            "model": f"codex:{os.environ.get('CODEX_MODEL') or 'gpt-5.4'}",
+            "verdict": "ERROR",
+            "text": "subscription_only policy forbids CODEX_API_KEY fallback",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    if auth_mode == "api_only" and not api_key:
+        return {
+            "model": f"codex:{os.environ.get('CODEX_MODEL') or 'gpt-5.4'}",
+            "verdict": "ERROR",
+            "text": "api_only policy requires CODEX_API_KEY",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    model = str(os.environ.get("CODEX_MODEL") or "gpt-5.4")
+    _prepare_codex_review_config(worktree_path, model)
+    output_path = worktree_path.parent / f"{worktree_path.name}-review-output.json"
+    cmd = [
+        cli_bin,
+        "exec",
+        prompt,
+        "--sandbox",
+        "read-only",
+        "--json",
+        "-o",
+        str(output_path),
+    ]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            timeout=int(os.environ.get("CODEX_EXECUTOR_TIMEOUT_SEC", os.environ.get("OUROBOROS_HARD_TIMEOUT_SEC", "1800"))),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "model": f"codex:{model}",
+            "verdict": "ERROR",
+            "text": "Error: Timeout",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    except Exception as exc:
+        return {
+            "model": f"codex:{model}",
+            "verdict": "ERROR",
+            "text": f"Error: {type(exc).__name__}: {exc}",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    raw_output = ""
+    if output_path.exists():
+        try:
+            raw_output = output_path.read_text(encoding="utf-8")
+        except Exception:
+            raw_output = ""
+    payload = _extract_last_json_object(raw_output) or _extract_last_json_object(proc.stdout)
+    text = _extract_review_text(raw_output or proc.stdout, payload)
+    if proc.returncode != 0:
+        text = text or (proc.stderr or proc.stdout or f"codex exited with code {proc.returncode}")
+        return {
+            "model": f"codex:{model}",
+            "verdict": "ERROR",
+            "text": text.strip(),
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    return {
+        "model": f"codex:{model}",
+        "verdict": "PASS" if _parse_review_json(text) is not None else "UNKNOWN",
+        "text": text,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_estimate": 0.0,
+    }
+
+
+def _run_claude_cli_review(prompt: str, worktree_path: pathlib.Path) -> dict:
+    cli_bin = "claude"
+    if not shutil.which(cli_bin):
+        return {
+            "model": f"claude_code:{os.environ.get('CLAUDE_CODE_MODEL') or 'sonnet'}",
+            "verdict": "ERROR",
+            "text": f"{cli_bin} not found in PATH",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    env = os.environ.copy()
+    auth_mode = str(os.environ.get("CLAUDE_CODE_AUTH_MODE") or "subscription_only").strip()
+    api_key = str(env.get("ANTHROPIC_API_KEY") or "").strip()
+    if auth_mode == "subscription_only" and api_key:
+        return {
+            "model": f"claude_code:{os.environ.get('CLAUDE_CODE_MODEL') or 'sonnet'}",
+            "verdict": "ERROR",
+            "text": "subscription_only policy forbids ANTHROPIC_API_KEY presence",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    if auth_mode == "api_only" and not api_key:
+        return {
+            "model": f"claude_code:{os.environ.get('CLAUDE_CODE_MODEL') or 'sonnet'}",
+            "verdict": "ERROR",
+            "text": "api_only policy requires ANTHROPIC_API_KEY",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    model = str(os.environ.get("CLAUDE_CODE_MODEL") or "sonnet")
+    cmd = [
+        cli_bin,
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+        "--model",
+        model,
+        "--permission-mode",
+        "acceptEdits",
+    ]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            timeout=int(os.environ.get("CLAUDE_EXECUTOR_TIMEOUT_SEC", os.environ.get("OUROBOROS_HARD_TIMEOUT_SEC", "1800"))),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "model": f"claude_code:{model}",
+            "verdict": "ERROR",
+            "text": "Error: Timeout",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    except Exception as exc:
+        return {
+            "model": f"claude_code:{model}",
+            "verdict": "ERROR",
+            "text": f"Error: {type(exc).__name__}: {exc}",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+
+    payload = _extract_last_json_object(proc.stdout)
+    text = _extract_review_text(proc.stdout, payload)
+    if proc.returncode != 0:
+        text = text or (proc.stderr or proc.stdout or f"claude exited with code {proc.returncode}")
+        return {
+            "model": f"claude_code:{model}",
+            "verdict": "ERROR",
+            "text": text.strip(),
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_estimate": 0.0,
+        }
+    cost = 0.0
+    if isinstance(payload, dict):
+        try:
+            cost = float(payload.get("total_cost_usd") or 0.0)
+        except Exception:
+            cost = 0.0
+    return {
+        "model": f"claude_code:{model}",
+        "verdict": "PASS" if _parse_review_json(text) is not None else "UNKNOWN",
+        "text": text,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_estimate": cost,
+    }
+
+
+def _run_local_cli_review(ctx: ToolContext, executor: str, prompt: str) -> dict:
+    from ouroboros.executors.worktree import WorktreeManager
+
+    repo_dir = pathlib.Path(ctx.repo_dir)
+    drive_root = pathlib.Path(ctx.drive_root)
+    review_task_id = f"review-{executor}-{uuid.uuid4().hex[:8]}"
+    worktrees_subdir = str(os.environ.get("EXECUTOR_WORKTREES_SUBDIR") or "worktrees")
+    worktrees_root = drive_root / worktrees_subdir
+    manager = WorktreeManager(repo_dir, branch_dev=ctx.branch_dev, worktrees_root=worktrees_root)
+    handle = manager.prepare_worktree(task_id=review_task_id, base_branch=ctx.branch_dev, executor=executor)
+
+    try:
+        if executor == "codex":
+            _prepare_codex_review_config(
+                handle.path,
+                str(os.environ.get("CODEX_MODEL") or "gpt-5.4"),
+            )
+        baseline_status = _snapshot_worktree_status(handle.path)
+        if executor == "codex":
+            result = _run_codex_cli_review(prompt, handle.path)
+        else:
+            result = _run_claude_cli_review(prompt, handle.path)
+        final_status = _snapshot_worktree_status(handle.path)
+        if final_status != baseline_status:
+            return {
+                "model": result.get("model", executor),
+                "verdict": "ERROR",
+                "text": (
+                    "Review executor attempted to modify the isolated review worktree. "
+                    "Local review runs are read-only."
+                ),
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "cost_estimate": 0.0,
+            }
+        return result
+    finally:
+        manager.cleanup_worktree(handle)
+
+
+def _run_review_backend(
+    ctx: ToolContext,
+    content: str,
+    prompt: str,
+    review_executor: str,
+) -> dict:
+    normalized = _normalize_review_executor(review_executor)
+    if normalized == "cloud":
+        models = _cfg.get_review_models()
+        result_json = _handle_multi_model_review(ctx, content=content, prompt=prompt, models=models)
+        result = json.loads(result_json)
+        result["review_executor"] = normalized
+        return result
+
+    results = []
+    for executor in _review_targets_for_executor(normalized):
+        results.append(_run_local_cli_review(ctx, executor=executor, prompt=prompt))
+    return {
+        "review_executor": normalized,
+        "model_count": len(results),
+        "constitutional_context": bool(_load_bible()),
+        "results": results,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +917,8 @@ def _build_critical_block_message(
 
 def _run_unified_review(ctx: ToolContext, commit_message: str,
                         review_rebuttal: str = "",
-                        repo_dir=None) -> Optional[str]:
+                        repo_dir=None,
+                        review_executor: str = "") -> Optional[str]:
     """Unified pre-commit review: 3 models, structured JSON, consistent severity.
 
     Returns None if commit may proceed. In blocking mode returns a blocking
@@ -632,17 +981,20 @@ def _run_unified_review(ctx: ToolContext, commit_message: str,
         diff_text=diff_text,
         changed_files=changed,
     )
-
-    models = _cfg.get_review_models()
+    prompt += (
+        "\n\n## Execution constraints\n\n"
+        "- This is a review-only task. Do NOT modify files.\n"
+        "- Output ONLY the requested JSON array.\n"
+    )
+    resolved_executor = _normalize_review_executor(review_executor)
 
     try:
-        result_json = _handle_multi_model_review(
+        result = _run_review_backend(
             ctx,
             content="Review the staged diff and context provided in the instructions above.",
             prompt=prompt,
-            models=models,
+            review_executor=resolved_executor,
         )
-        result = json.loads(result_json)
     except Exception as e:
         log.error("Unified review infrastructure failure: %s", e)
         blocked_msg = (
@@ -683,15 +1035,19 @@ def _run_unified_review(ctx: ToolContext, commit_message: str,
     critical_fails, advisory_warns, errored_models = _collect_review_findings(ctx, model_results)
 
     models_total = len(model_results)
+    minimum_successes = _required_successful_reviews(resolved_executor, models_total)
 
-    # Quorum: at least 2 of N reviewers must succeed
     successful_reviewers = models_total - len(errored_models)
-    if successful_reviewers < 2:
+    if successful_reviewers < minimum_successes:
+        error_details = ""
+        if advisory_warns:
+            error_details = "\n" + "\n".join(f"  WARN: {w}" for w in advisory_warns)
         blocked_msg = (
             f"⚠️ REVIEW_BLOCKED: Only {successful_reviewers} of {models_total} review "
-            f"models responded successfully (minimum 2 required). "
+            f"models responded successfully (minimum {minimum_successes} required). "
             f"Unavailable: {', '.join(errored_models)}.\n"
             "Retry the commit — transient model failures usually resolve quickly."
+            f"{error_details}"
         )
         return _handle_review_block_or_warning(
             ctx, blocking_review, blocked_msg,
@@ -703,7 +1059,7 @@ def _run_unified_review(ctx: ToolContext, commit_message: str,
         errored_note = (
             f"\n\nNote: {len(errored_models)} of {models_total} review models "
             f"were unavailable ({', '.join(errored_models)}). "
-            "Target is 3 working reviewers."
+            f"Target is {minimum_successes} successful reviewer(s)."
         )
 
     if critical_fails:

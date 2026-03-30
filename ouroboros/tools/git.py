@@ -468,7 +468,8 @@ def _str_replace_editor(ctx: ToolContext, path: str, old_str: str, new_str: str)
 
 def _repo_write_commit(ctx: ToolContext, path: str, content: str,
                         commit_message: str, skip_tests: bool = False,
-                        also_stage: Optional[List[str]] = None) -> str:
+                        also_stage: Optional[List[str]] = None,
+                        review_executor: str = "") -> str:
     """Legacy compatibility: write one file + commit. Prefer repo_write + repo_commit."""
     global _consecutive_test_failures
     ctx.last_push_succeeded = False
@@ -510,7 +511,11 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str,
                 except Exception:
                     pass
 
-        review_err = _run_unified_review(ctx, commit_message)
+        review_err = _run_unified_review(
+            ctx,
+            commit_message,
+            review_executor=review_executor,
+        )
         if review_err:
             run_cmd(["git", "reset", "HEAD"], cwd=ctx.repo_dir)
             return review_err
@@ -532,7 +537,8 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str,
 def _repo_commit_push(ctx: ToolContext, commit_message: str,
                        paths: Optional[List[str]] = None,
                        skip_tests: bool = False,
-                       review_rebuttal: str = "") -> str:
+                       review_rebuttal: str = "",
+                       review_executor: str = "") -> str:
     """Stage, review, and commit files with unified pre-commit review."""
     ctx.last_push_succeeded = False
     ctx._review_advisory = []
@@ -569,7 +575,12 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str,
         if not status.strip():
             return "⚠️ GIT_NO_CHANGES: nothing to commit."
 
-        review_err = _run_unified_review(ctx, commit_message, review_rebuttal=review_rebuttal)
+        review_err = _run_unified_review(
+            ctx,
+            commit_message,
+            review_rebuttal=review_rebuttal,
+            review_executor=review_executor,
+        )
         if review_err:
             run_cmd(["git", "reset", "HEAD"], cwd=ctx.repo_dir)
             return review_err
@@ -883,6 +894,8 @@ def get_tools() -> List[ToolEntry]:
                 "commit_message": {"type": "string"},
                 "skip_tests": {"type": "boolean", "default": False, "description": "Skip pre-commit tests."},
                 "also_stage": {"type": "array", "items": {"type": "string"}, "description": "Additional files to stage"},
+                "review_executor": {"type": "string", "enum": ["cloud", "codex", "claude_code", "both"], "default": "cloud",
+                    "description": "Review backend: cloud multi-model review, Codex CLI, Claude Code CLI, or both local CLIs."},
             }, "required": ["path", "content", "commit_message"]},
         }, _repo_write_commit, is_code_tool=True),
         ToolEntry("repo_commit", {
@@ -897,6 +910,8 @@ def get_tools() -> List[ToolEntry]:
                 "skip_tests": {"type": "boolean", "default": False, "description": "Skip pre-commit tests."},
                 "review_rebuttal": {"type": "string", "default": "",
                     "description": "If previous commit was blocked by reviewers and you disagree, include counter-argument."},
+                "review_executor": {"type": "string", "enum": ["cloud", "codex", "claude_code", "both"], "default": "cloud",
+                    "description": "Review backend: cloud multi-model review, Codex CLI, Claude Code CLI, or both local CLIs."},
             }, "required": ["commit_message"]},
         }, _repo_commit_push, is_code_tool=True),
         ToolEntry("git_status", {
