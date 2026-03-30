@@ -6,6 +6,10 @@ from ouroboros.config import (
     resolve_effort,
     get_review_models,
     get_review_enforcement,
+    has_openrouter_config,
+    has_local_model_config,
+    has_configured_llm_backend,
+    use_local_for_lane,
 )
 
 
@@ -45,6 +49,13 @@ def test_effort_defaults_in_config():
     assert SETTINGS_DEFAULTS.get("OUROBOROS_EFFORT_EVOLUTION") == "high"
     assert SETTINGS_DEFAULTS.get("OUROBOROS_EFFORT_REVIEW") == "medium"
     assert SETTINGS_DEFAULTS.get("OUROBOROS_EFFORT_CONSCIOUSNESS") == "low"
+
+
+def test_base_url_and_local_api_defaults_in_config():
+    """Provider/base-url defaults are present and backward-compatible."""
+    assert SETTINGS_DEFAULTS.get("OPENROUTER_BASE_URL") == "https://openrouter.ai/api/v1"
+    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL") == ""
+    assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_API_KEY") == ""
 
 
 def test_review_models_default_in_config():
@@ -156,3 +167,87 @@ def test_apply_settings_to_env_includes_effort_keys():
               "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
               "OUROBOROS_REVIEW_MODELS", "OUROBOROS_REVIEW_ENFORCEMENT"):
         os.environ.pop(k, None)
+
+
+def test_apply_settings_to_env_includes_new_base_url_keys():
+    settings = {
+        "OPENROUTER_BASE_URL": "https://proxy.example/api/v1",
+        "LOCAL_MODEL_BASE_URL": "http://localhost:9999/v1",
+        "LOCAL_MODEL_API_KEY": "local-key",
+    }
+    apply_settings_to_env(settings)
+    assert os.environ.get("OPENROUTER_BASE_URL") == "https://proxy.example/api/v1"
+    assert os.environ.get("LOCAL_MODEL_BASE_URL") == "http://localhost:9999/v1"
+    assert os.environ.get("LOCAL_MODEL_API_KEY") == "local-key"
+    for k in ("OPENROUTER_BASE_URL", "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY"):
+        os.environ.pop(k, None)
+
+
+def test_llm_backend_scenario_a_openrouter_only():
+    settings = {
+        "OPENROUTER_API_KEY": "sk-or-123",
+        "LOCAL_MODEL_BASE_URL": "",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert has_openrouter_config(settings) is True
+    assert has_local_model_config(settings) is False
+    assert has_configured_llm_backend(settings) is True
+    assert use_local_for_lane("MAIN", settings) is False
+
+
+def test_llm_backend_scenario_b_local_base_url_only():
+    settings = {
+        "OPENROUTER_API_KEY": "",
+        "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert has_openrouter_config(settings) is False
+    assert has_local_model_config(settings) is True
+    assert has_configured_llm_backend(settings) is True
+    assert use_local_for_lane("MAIN", settings) is True
+
+
+def test_llm_backend_scenario_b_legacy_local_port_path():
+    settings = {
+        "OPENROUTER_API_KEY": "",
+        "LOCAL_MODEL_BASE_URL": "",
+        "LOCAL_MODEL_SOURCE": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+        "LOCAL_MODEL_PORT": 8766,
+        "USE_LOCAL_MAIN": True,
+    }
+    assert has_openrouter_config(settings) is False
+    assert has_local_model_config(settings) is True
+    assert has_configured_llm_backend(settings) is True
+    assert use_local_for_lane("MAIN", settings) is True
+
+
+def test_llm_backend_scenario_c_both_configured_defaults_to_cloud_unless_explicit_local():
+    settings = {
+        "OPENROUTER_API_KEY": "sk-or-123",
+        "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert has_configured_llm_backend(settings) is True
+    assert use_local_for_lane("MAIN", settings) is False
+
+    settings["USE_LOCAL_MAIN"] = True
+    assert use_local_for_lane("MAIN", settings) is True
+
+
+def test_llm_backend_scenario_d_none_configured():
+    settings = {
+        "OPENROUTER_API_KEY": "",
+        "LOCAL_MODEL_BASE_URL": "",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert has_openrouter_config(settings) is False
+    assert has_local_model_config(settings) is False
+    assert has_configured_llm_backend(settings) is False

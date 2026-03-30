@@ -15,6 +15,13 @@ import time
 import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from ouroboros.config import (
+    has_local_model_config,
+    resolve_local_model_api_key,
+    resolve_local_model_base_url,
+    resolve_openrouter_base_url,
+)
+
 log = logging.getLogger(__name__)
 
 DEFAULT_LIGHT_MODEL = "anthropic/claude-sonnet-4.6"
@@ -22,6 +29,10 @@ DEFAULT_LIGHT_MODEL = "anthropic/claude-sonnet-4.6"
 
 class LocalContextTooLargeError(RuntimeError):
     """Raised when a local model cannot fit context without silent truncation."""
+
+
+class LocalBackendUnavailableError(RuntimeError):
+    """Raised when local LLM backend is unreachable."""
 
 
 def _estimate_message_chars(messages: List[Dict[str, Any]]) -> int:
@@ -163,7 +174,7 @@ def fetch_openrouter_pricing() -> Dict[str, Tuple[float, float, float]]:
         return {}
 
     try:
-        url = "https://openrouter.ai/api/v1/models"
+        url = f"{resolve_openrouter_base_url()}/models"
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
 
@@ -218,27 +229,36 @@ class LLMClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://openrouter.ai/api/v1",
+        base_url: Optional[str] = None,
     ):
         self._api_key_override = api_key
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url = base_url
+        self._base_url_override = base_url
+        self._base_url = resolve_openrouter_base_url(base_url)
         self._client = None
         self._client_api_key: Optional[str] = None
+        self._client_base_url: Optional[str] = None
         self._async_client = None
         self._async_client_api_key: Optional[str] = None
-        self._local_client = None
-        self._local_port: Optional[int] = None
+        self._async_client_base_url: Optional[str] = None
+
+    def _resolve_openrouter_base_url(self) -> str:
+        return resolve_openrouter_base_url(self._base_url_override)
 
     def _get_client(self):
         current_api_key = self._api_key_override
         if current_api_key is None:
             current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        current_base_url = self._resolve_openrouter_base_url()
 
-        if self._client is None or self._client_api_key != current_api_key:
+        if (
+            self._client is None
+            or self._client_api_key != current_api_key
+            or self._client_base_url != current_base_url
+        ):
             from openai import OpenAI
             self._client = OpenAI(
-                base_url=self._base_url,
+                base_url=current_base_url,
                 api_key=current_api_key,
                 max_retries=0,
                 default_headers={
@@ -247,30 +267,25 @@ class LLMClient:
                 },
             )
             self._client_api_key = current_api_key
+            self._client_base_url = current_base_url
             self._api_key = current_api_key
+            self._base_url = current_base_url
         return self._client
-
-    def _get_local_client(self):
-        port = int(os.environ.get("LOCAL_MODEL_PORT", "8766"))
-        if self._local_client is None or self._local_port != port:
-            from openai import OpenAI
-            self._local_client = OpenAI(
-                base_url=f"http://127.0.0.1:{port}/v1",
-                api_key="local",
-                max_retries=0,
-            )
-            self._local_port = port
-        return self._local_client
 
     def _get_async_client(self):
         current_api_key = self._api_key_override
         if current_api_key is None:
             current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        current_base_url = self._resolve_openrouter_base_url()
 
-        if self._async_client is None or self._async_client_api_key != current_api_key:
+        if (
+            self._async_client is None
+            or self._async_client_api_key != current_api_key
+            or self._async_client_base_url != current_base_url
+        ):
             from openai import AsyncOpenAI
             self._async_client = AsyncOpenAI(
-                base_url=self._base_url,
+                base_url=current_base_url,
                 api_key=current_api_key,
                 max_retries=0,
                 default_headers={
@@ -279,6 +294,7 @@ class LLMClient:
                 },
             )
             self._async_client_api_key = current_api_key
+            self._async_client_base_url = current_base_url
         return self._async_client
 
     @staticmethod
@@ -298,7 +314,7 @@ class LLMClient:
         """Fetch cost from OpenRouter Generation API as fallback."""
         try:
             import requests
-            url = f"{self._base_url.rstrip('/')}/generation?id={generation_id}"
+            url = f"{self._resolve_openrouter_base_url()}/generation?id={generation_id}"
             resp = requests.get(url, headers={"Authorization": f"Bearer {self._api_key}"}, timeout=5)
             if resp.status_code == 200:
                 data = resp.json().get("data") or {}
@@ -334,10 +350,39 @@ class LLMClient:
         When use_local=True, routes to the local llama-cpp-python server
         and strips OpenRouter-specific parameters (reasoning, provider, cache_control).
         """
-        if use_local:
-            return self._chat_local(messages, tools, max_tokens, tool_choice)
+        current_api_key = self._api_key_override
+        if current_api_key is None:
+            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        should_fallback_to_local = (
+            not use_local
+            and not str(current_api_key or "").strip()
+            and has_local_model_config()
+        )
 
-        return self._chat_openrouter(messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature)
+        if use_local or should_fallback_to_local:
+            if should_fallback_to_local:
+                log.info(
+                    "OPENROUTER_API_KEY is not set; routing chat() call to local backend "
+                    "for model '%s'",
+                    model,
+                )
+            return self._chat_local(
+                messages=messages,
+                model=model,
+                tools=tools,
+                max_tokens=max_tokens,
+                tool_choice=tool_choice,
+            )
+
+        return self._chat_openrouter(
+            messages=messages,
+            model=model,
+            tools=tools,
+            reasoning_effort=reasoning_effort,
+            max_tokens=max_tokens,
+            tool_choice=tool_choice,
+            temperature=temperature,
+        )
 
     async def chat_async(
         self,
@@ -400,15 +445,53 @@ class LLMClient:
             f"({compacted_chars} chars > target {target_chars})."
         )
 
+    @staticmethod
+    def _normalize_local_message_order(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure backend-compatible ordering and shape for strict proxies.
+
+        Some OpenAI-compatible proxies require exactly one system message at
+        index 0. We therefore move all system messages to the beginning and
+        collapse them into a single system block.
+        """
+        system_texts: List[str] = []
+        other_msgs: List[Dict[str, Any]] = []
+        seen_non_system = False
+        had_late_system = False
+
+        for msg in messages:
+            if str(msg.get("role", "")).strip() == "system":
+                system_texts.append(str(msg.get("content", "") or ""))
+                if seen_non_system:
+                    had_late_system = True
+            else:
+                seen_non_system = True
+                other_msgs.append(msg)
+
+        if not system_texts:
+            return other_msgs
+
+        combined_system = {
+            "role": "system",
+            "content": "\n\n".join(part for part in system_texts if part).strip(),
+        }
+
+        if had_late_system or len(system_texts) > 1:
+            log.info(
+                "Normalized local chat payload: collapsed %d system message(s) into one at index 0",
+                len(system_texts),
+            )
+        return [combined_system] + other_msgs
+
     def _chat_local(
         self,
         messages: List[Dict[str, Any]],
+        model: str,
         tools: Optional[List[Dict[str, Any]]],
         max_tokens: int,
         tool_choice: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Send a chat request to the local llama-cpp-python server."""
-        client = self._get_local_client()
+        import requests
 
         clean_messages = self._strip_cache_control(messages)
         # Flatten multipart content blocks to plain strings (local server doesn't support arrays)
@@ -432,6 +515,7 @@ class LLMClient:
                     b.get("text", "") for b in content
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
+        clean_messages = self._normalize_local_message_order(clean_messages)
 
         clean_tools = None
         if tools:
@@ -440,32 +524,101 @@ class LLMClient:
                 for t in tools
             ]
 
+        requested_model = str(model or "").strip() or "local-model"
         kwargs: Dict[str, Any] = {
-            "model": "local-model",
+            "model": requested_model,
             "messages": clean_messages,
             "max_tokens": local_max,
         }
         if clean_tools:
             kwargs["tools"] = clean_tools
             kwargs["tool_choice"] = tool_choice
+        headers: Dict[str, str] = {}
+        local_api_key = resolve_local_model_api_key().strip()
+        if local_api_key:
+            headers["Authorization"] = f"Bearer {local_api_key}"
+        base_url = resolve_local_model_base_url()
+        endpoint = f"{base_url}/chat/completions"
 
         last_exc: Optional[Exception] = None
+        last_conn_err: Optional[Exception] = None
+        resp_dict: Dict[str, Any] = {}
+        tools_disabled_for_compat = False
         for attempt in range(3):
             try:
-                resp = client.chat.completions.create(**kwargs)
+                resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
+                status_code = int(getattr(resp, "status_code", 0) or 0)
+                if 400 <= status_code < 500 and self._is_local_model_not_found(resp):
+                    fallback_model = self._choose_local_fallback_model(
+                        requested_model=requested_model,
+                        current_model=str(kwargs.get("model") or "").strip(),
+                        base_url=base_url,
+                        headers=headers,
+                    )
+                    if fallback_model and fallback_model != kwargs.get("model"):
+                        kwargs["model"] = fallback_model
+                        log.warning(
+                            "Local backend model '%s' not found at %s; retrying with '%s'",
+                            requested_model,
+                            base_url,
+                            fallback_model,
+                        )
+                        time.sleep(0.2)
+                        continue
+                if 400 <= status_code < 500:
+                    error_text = self._extract_local_error_text(resp)
+                    if self._is_local_context_error_text(error_text):
+                        self._shrink_messages_from_error(clean_messages, error_text)
+                        kwargs["messages"] = clean_messages
+                        log.warning(
+                            "Local backend rejected request due to context length for model '%s'; "
+                            "shrinking messages and retrying",
+                            str(kwargs.get("model") or "").strip(),
+                        )
+                        time.sleep(0.2)
+                        continue
+                    if clean_tools and not tools_disabled_for_compat and self._is_local_tools_unsupported_text(error_text):
+                        tools_disabled_for_compat = True
+                        clean_tools = None
+                        kwargs.pop("tools", None)
+                        kwargs.pop("tool_choice", None)
+                        log.warning(
+                            "Local backend rejected tools payload for model '%s'; "
+                            "retrying without tools",
+                            str(kwargs.get("model") or "").strip(),
+                        )
+                        time.sleep(0.2)
+                        continue
+                resp.raise_for_status()
+                resp_dict = resp.json()
                 last_exc = None
+                last_conn_err = None
                 break
             except Exception as exc:
                 last_exc = exc
+                if isinstance(exc, requests.exceptions.ConnectionError):
+                    last_conn_err = exc
                 err = str(exc)
+                resp = getattr(exc, "response", None)
+                if resp is not None:
+                    backend_err = self._extract_local_error_text(resp)
+                    if backend_err and backend_err not in err.lower():
+                        err = f"{err} | backend_error={backend_err[:500]}"
                 if "context_length_exceeded" in err:
                     raise LocalContextTooLargeError(err) from exc
-                log.warning("Local model request failed: %s", exc)
-                raise
+                if attempt >= 2:
+                    log.warning("Local model request failed: %s", err)
+                    break
+                time.sleep(0.2)
+        if last_conn_err is not None:
+            raise LocalBackendUnavailableError(
+                "Local LLM backend is unreachable at "
+                f"{endpoint}. Start a local server on that address/port "
+                "or set LOCAL_MODEL_BASE_URL to a reachable OpenAI-compatible endpoint."
+            ) from last_conn_err
         if last_exc is not None:
             raise last_exc
 
-        resp_dict = resp.model_dump()
         usage = resp_dict.get("usage") or {}
         choices = resp_dict.get("choices") or [{}]
         msg = (choices[0] if choices else {}).get("message") or {}
@@ -480,6 +633,122 @@ class LLMClient:
 
         usage["cost"] = 0.0
         return msg, usage
+
+    @staticmethod
+    def _extract_local_error_text(response: Any) -> str:
+        try:
+            payload = response.json()
+        except Exception:
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+
+        chunks: List[str] = []
+        for key in ("type", "code", "message", "detail"):
+            val = payload.get(key)
+            if val is not None:
+                chunks.append(str(val))
+
+        nested = payload.get("error")
+        if isinstance(nested, dict):
+            for key in ("type", "code", "message", "detail"):
+                val = nested.get(key)
+                if val is not None:
+                    chunks.append(str(val))
+
+        return " | ".join(part.strip() for part in chunks if str(part).strip()).lower()
+
+    @staticmethod
+    def _is_local_context_error_text(error_text: str) -> bool:
+        text = str(error_text or "").lower()
+        return (
+            "context_length_exceeded" in text
+            or ("maximum context length" in text and "requested" in text)
+            or ("too many tokens" in text)
+        )
+
+    @staticmethod
+    def _is_local_tools_unsupported_text(error_text: str) -> bool:
+        text = str(error_text or "").lower()
+        return (
+            ("tool" in text and ("unsupported" in text or "not supported" in text))
+            or ("invalid" in text and "tool_choice" in text)
+            or ("invalid" in text and "tools" in text)
+        )
+
+    @staticmethod
+    def _is_local_model_not_found(response: Any) -> bool:
+        """Best-effort detection of model-not-found payloads."""
+        try:
+            payload = response.json()
+        except Exception:
+            return False
+        if not isinstance(payload, dict):
+            return False
+
+        err_type = str(payload.get("type", "")).strip().lower()
+        err_msg = str(payload.get("message", "")).strip().lower()
+        if err_type == "model_not_found" or ("model" in err_msg and "not found" in err_msg):
+            return True
+
+        # Some OpenAI-compatible backends wrap errors under "error".
+        nested = payload.get("error")
+        if isinstance(nested, dict):
+            nested_type = str(nested.get("type", "")).strip().lower()
+            nested_code = str(nested.get("code", "")).strip().lower()
+            nested_msg = str(nested.get("message", "")).strip().lower()
+            if (
+                nested_type == "model_not_found"
+                or nested_code == "model_not_found"
+                or ("invalid model" in nested_msg)
+                or ("model" in nested_msg and "not found" in nested_msg)
+            ):
+                return True
+
+        return False
+
+    def _choose_local_fallback_model(
+        self,
+        requested_model: str,
+        current_model: str,
+        base_url: str,
+        headers: Dict[str, str],
+    ) -> Optional[str]:
+        """Pick a compatible local model from /models when requested one is unavailable."""
+        try:
+            import requests
+
+            resp = requests.get(f"{base_url}/models", headers=headers, timeout=20)
+            resp.raise_for_status()
+            data = resp.json() if isinstance(resp.json(), dict) else {}
+            items = data.get("data", []) or []
+            available = [
+                str(item.get("id", "")).strip()
+                for item in items
+                if isinstance(item, dict) and str(item.get("id", "")).strip()
+            ]
+        except Exception:
+            return None
+
+        if not available:
+            return None
+        if requested_model in available:
+            return requested_model
+
+        preferred = [
+            str(os.environ.get("OUROBOROS_MODEL", "")).strip(),
+            str(os.environ.get("OUROBOROS_MODEL_LIGHT", "")).strip(),
+            str(os.environ.get("OUROBOROS_MODEL_CODE", "")).strip(),
+            "Qwen/Qwen3.5-27B",
+        ]
+        for candidate in preferred:
+            if candidate and candidate != current_model and candidate in available:
+                return candidate
+
+        for candidate in available:
+            if candidate != current_model:
+                return candidate
+        return None
 
     @staticmethod
     def _parse_tool_calls_from_content(
@@ -699,6 +968,19 @@ class LLMClient:
         temperature: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Send a chat request to OpenRouter."""
+        current_api_key = self._api_key_override
+        if current_api_key is None:
+            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not str(current_api_key or "").strip():
+            if has_local_model_config():
+                raise RuntimeError(
+                    "Cloud LLM backend is not configured (missing OPENROUTER_API_KEY). "
+                    "Local model is configured; route this call through local backend."
+                )
+            raise RuntimeError(
+                "No LLM provider configured. Configure OpenRouter API key "
+                "or local model backend."
+            )
         client = self._get_client()
         kwargs = self._build_openrouter_kwargs(
             messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature

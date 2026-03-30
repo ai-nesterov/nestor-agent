@@ -44,3 +44,5 @@ Thumbs.db
 
 # Test artifacts
 <MagicMock*
+
+nestor_agent_env

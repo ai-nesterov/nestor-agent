@@ -1,4 +1,4 @@
-# Ouroboros v4.5.0 — Architecture & Reference
+# Ouroboros v4.5.1 — Architecture & Reference
 
 This document describes every component, page, button, API endpoint, and data flow.
 It is the single source of truth for how the system works. Keep it updated.
@@ -141,8 +141,8 @@ launcher.py main()
 
 ### First-run wizard
 
-Shown when `settings.json` does not exist or has no `OPENROUTER_API_KEY`.
-Fields: OpenRouter API Key (required), Total Budget ($), Main Model.
+Shown when `settings.json` has no configured LLM backend.
+Fields: OpenRouter API Key (optional), local model preset (optional), Total Budget ($), Main Model.
 On save: writes `settings.json`, closes wizard, proceeds to main app.
 
 ### Core file sync (`_sync_core_files`)
@@ -203,9 +203,11 @@ Navigation is a left sidebar with 8 pages.
 
 ### 3.3 Settings
 
-- **API Keys**: OpenRouter (required), OpenAI (optional, for web search), Anthropic (optional).
+- **API Keys**: OpenRouter (optional, required for cloud path), OpenAI (optional, for web search), Anthropic (optional), Local model (optional).
   Keys are displayed as masked values (e.g., `sk-or-v1...`).
   Only overwritten on save if user enters a new value (not containing `...`).
+- **Provider Base URLs**: OpenRouter base URL and optional local OpenAI-compatible base URL.
+  Local base URL falls back to legacy `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` behavior when unset.
 - **Models**: Main, Code, Light, Fallback.
 - **Reasoning Effort**: Four separate dropdowns for task/chat, evolution, review, and consciousness.
   Backed by `OUROBOROS_EFFORT_TASK`, `OUROBOROS_EFFORT_EVOLUTION`, `OUROBOROS_EFFORT_REVIEW`,
@@ -297,6 +299,7 @@ Navigation is a left sidebar with 8 pages.
 | GET | `/api/evolution-data` | Evolution metrics per git tag (LOC, prompt sizes, memory) |
 | GET | `/api/chat/history` | Merged chat + system summaries + progress messages (chronological, limit param) |
 | POST | `/api/local-model/test` | Local model sanity test (chat + tool calling) |
+| POST | `/api/telegram/webhook` | Telegram Bot API webhook: receives updates, routes to message_bus as `telegram_message` tasks |
 | WS | `/ws` | WebSocket: chat messages, commands, log streaming |
 | GET | `/static/*` | Static files from `web/` directory (NoCacheStaticFiles wrapper forces revalidation) |
 
@@ -392,6 +395,15 @@ Each iteration (0.5s sleep):
 - **Credential helper**: `git_ops.configure_remote()` stores credentials in repo-local
   `.git/credentials`. `migrate_remote_credentials()` migrates legacy token-in-URL origins.
   Both are wired at startup and on settings save.
+
+### Telegram tools (tools/telegram.py)
+
+- **`telegram_send_message`**: Send a text message to a Telegram chat (4096 char limit)
+- **`telegram_setup_webhook`**: Configure webhook URL with Telegram Bot API
+- **`telegram_get_webhook_info`**: Get current webhook status and statistics
+- **`telegram_get_me`**: Get bot information (username, ID)
+- **Integration flow**: Webhook endpoint (`/api/telegram/webhook`) receives updates → routes to message_bus as `telegram_message` tasks → agent processes → response sent via `telegram_send_message`
+- **Configuration**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_ENABLED`, `TELEGRAM_WEBHOOK_URL` in settings
 
 ### Safety system (safety.py + registry.py)
 
@@ -504,7 +516,8 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| OPENROUTER_API_KEY | "" | Required. Main LLM API key |
+| OPENROUTER_API_KEY | "" | Optional cloud LLM API key (required only for OpenRouter mode) |
+| OPENROUTER_BASE_URL | https://openrouter.ai/api/v1 | Base URL for OpenRouter-compatible cloud routing |
 | OPENAI_API_KEY | "" | Optional. For web_search tool |
 | ANTHROPIC_API_KEY | "" | Optional. For Claude Code CLI |
 | OUROBOROS_MODEL | anthropic/claude-opus-4.6 | Main reasoning model |
@@ -525,6 +538,8 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 | OUROBOROS_HARD_TIMEOUT_SEC | 1800 | Hard timeout kill (30 min) |
 | LOCAL_MODEL_SOURCE | "" | HuggingFace repo for local model |
 | LOCAL_MODEL_FILENAME | "" | GGUF filename within repo |
+| LOCAL_MODEL_BASE_URL | "" | Optional local OpenAI-compatible base URL (empty = legacy LOCAL_MODEL_PORT fallback) |
+| LOCAL_MODEL_API_KEY | "" | Optional bearer token for local OpenAI-compatible endpoints |
 | LOCAL_MODEL_CONTEXT_LENGTH | 16384 | Context window for local model |
 | LOCAL_MODEL_N_GPU_LAYERS | 0 | GPU layers (-1=all, 0=CPU/mmap) |
 | USE_LOCAL_MAIN | false | Route main model to local server |

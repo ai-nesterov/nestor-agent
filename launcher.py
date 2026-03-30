@@ -39,6 +39,7 @@ from ouroboros.config import (
     HOME, APP_ROOT, REPO_DIR, DATA_DIR, SETTINGS_PATH, PID_FILE, PORT_FILE,
     RESTART_EXIT_CODE, PANIC_EXIT_CODE, AGENT_SERVER_PORT,
     read_version, load_settings, save_settings, acquire_pid_lock, release_pid_lock,
+    has_configured_llm_backend, has_local_model_config,
 )
 MAX_CRASH_RESTARTS = 5
 CRASH_WINDOW_SEC = 120
@@ -391,10 +392,11 @@ def _migrate_old_settings() -> None:
 
     migrated = {}
     env_keys = [
-        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
         "OUROBOROS_MODEL", "OUROBOROS_MODEL_CODE", "OUROBOROS_MODEL_LIGHT",
         "OUROBOROS_MODEL_FALLBACK", "TOTAL_BUDGET", "OUROBOROS_MAX_WORKERS",
         "OUROBOROS_SOFT_TIMEOUT_SEC", "OUROBOROS_HARD_TIMEOUT_SEC",
+        "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY",
         "GITHUB_TOKEN", "GITHUB_REPO",
     ]
     for key in env_keys:
@@ -731,6 +733,8 @@ a { color:#e85d6f; }
   <label>OpenAI API Key <span class="opt">— for web search</span></label>
   <input id="openai-key" type="password" placeholder="sk-...">
   <p class="hint">Enables the web_search tool. <a href="https://platform.openai.com/api-keys" target="_blank">Get key</a></p>
+  <label>Local Model API Key <span class="opt">— optional, for protected local endpoints</span></label>
+  <input id="local-api-key" type="password" placeholder="sk-local-...">
 
   <h3>Local Model (optional)</h3>
   <label>Preset</label>
@@ -782,6 +786,8 @@ btn.addEventListener('click', async () => {
     if (orKey.length >= 10) data.OPENROUTER_API_KEY = orKey;
     const oaiKey = document.getElementById('openai-key').value.trim();
     if (oaiKey.length >= 10) data.OPENAI_API_KEY = oaiKey;
+    const localApiKey = document.getElementById('local-api-key').value.trim();
+    if (localApiKey.length > 0) data.LOCAL_MODEL_API_KEY = localApiKey;
     const p = preset.value;
     const defaultGpuLayers = navigator.platform.startsWith('Mac') ? -1 : 0;
     if (p && p !== 'custom' && PRESETS[p]) {
@@ -815,9 +821,9 @@ def _save_settings(settings: dict) -> None:
 
 
 def _run_first_run_wizard() -> bool:
-    """Show setup wizard if no API key or local model configured. Returns True if configured."""
+    """Show setup wizard if no LLM backend is configured. Returns True if configured."""
     settings = _load_settings()
-    if settings.get("OPENROUTER_API_KEY") or settings.get("LOCAL_MODEL_SOURCE"):
+    if has_configured_llm_backend(settings):
         return True
 
     import webview
@@ -826,9 +832,9 @@ def _run_first_run_wizard() -> bool:
     class WizardApi:
         def save_wizard(self, data: dict) -> str:
             key = str(data.get("OPENROUTER_API_KEY", "")).strip()
-            has_local = bool(data.get("LOCAL_MODEL_SOURCE", "").strip())
+            has_local = has_local_model_config(data)
             if len(key) < 10 and not has_local:
-                return "Provide an OpenRouter API key or select a local model."
+                return "Configure at least one LLM provider: OpenRouter or local model."
             settings.update(data)
             try:
                 _save_settings(settings)

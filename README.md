@@ -1,4 +1,4 @@
-# Ouroboros
+# Nestor (Ouroboros-base)
 
 [![GitHub stars](https://img.shields.io/github/stars/joi-lab/ouroboros-desktop?style=flat&logo=github)](https://github.com/joi-lab/ouroboros-desktop/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.5.0](https://img.shields.io/badge/version-4.5.0-green.svg)](VERSION)
+[![Version 4.5.1](https://img.shields.io/badge/version-4.5.1-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -35,7 +35,7 @@ Not a coding assistant. A digital being with a constitution, background consciou
   <img src="assets/setup.png" width="500" alt="Drag Ouroboros.app to install">
 </p>
 
-On first launch, right-click → **Open** (Gatekeeper bypass). The wizard will ask for your [OpenRouter API key](https://openrouter.ai/keys).
+On first launch, right-click → **Open** (Gatekeeper bypass). The wizard will ask you to configure at least one LLM backend: [OpenRouter API key](https://openrouter.ai/keys) or a local model.
 
 ---
 
@@ -175,12 +175,21 @@ Created on first launch:
 
 | Key | Required | Where to get it |
 |-----|----------|-----------------|
-| OpenRouter API Key | **Yes** | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| OpenRouter API Key | Optional (required for cloud models) | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | OpenAI API Key | No | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables web search tool |
 | Anthropic API Key | No | [console.anthropic.com](https://console.anthropic.com/settings/keys) — enables Claude Code CLI |
+| Local Model API Key | No | Optional bearer token for OpenAI-compatible local endpoints |
 | GitHub Token | No | [github.com/settings/tokens](https://github.com/settings/tokens) — enables remote sync |
 
 All keys are configured through the **Settings** page in the UI or during the first-run wizard.
+
+### Provider Endpoints
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL for OpenRouter-compatible cloud routing |
+| `LOCAL_MODEL_BASE_URL` | *(empty)* | If empty, falls back to legacy local URL: `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` |
+| `LOCAL_MODEL_API_KEY` | *(empty)* | If set, local requests send `Authorization: Bearer <LOCAL_MODEL_API_KEY>` |
 
 ### Default Models
 
@@ -195,7 +204,7 @@ All keys are configured through the **Settings** page in the UI or during the fi
 
 Task/chat reasoning defaults to `medium`.
 
-Models are configurable in the Settings page. All LLM calls go through [OpenRouter](https://openrouter.ai) (except web search, which uses OpenAI directly).
+Models are configurable in the Settings page. Cloud LLM calls use the configured OpenRouter-compatible base URL (default [OpenRouter](https://openrouter.ai)); web search still uses OpenAI directly.
 
 ---
 
@@ -238,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.5.1 | 2026-03-30 | Telegram bot integration: webhook endpoint, message routing via message_bus, telegram_send_message tool, config fields (TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_ENABLED, TELEGRAM_WEBHOOK_URL), automatic response handling for telegram_message task type. New file: ouroboros/tools/telegram.py with 4 tools (send_message, setup_webhook, get_webhook_info, get_me). |
 | 4.5.0 | 2026-03-19 | Context quality and prompt discipline release: fix provenance — system summaries now correctly marked as system, not user, across memory, consolidation, server API, and chat UI (amber system bubbles); restore execution reflections (task_reflections.jsonl) in live LLM context; move Health Invariants to the top of dynamic context block (both task and consciousness paths); task-scope recent progress/tools/events when task_id is available; harden run_shell against literal $VAR env-ref misuse in argv; add Claude CLI first-run retry and structured error classification; full SYSTEM.md editorial rewrite — terminology normalized to 'creator', new Methodology Check / Anti-Reactivity / Diagnostics Discipline / Knowledge Retrieval Triggers sections, stronger Health Invariant reactions, compressed inventory sections. 12 files changed, new regression tests. |
 | 4.4.0 | 2026-03-19 | Safe editing release: `str_replace_editor` tool for surgical edits to existing files, `repo_write` shrink guard blocks accidental truncation of tracked files (>30% shrinkage), full task lifecycle statuses (failed/interrupted/cancelled) with honest status tracking, rescue snapshot discoverability via health invariants, `provider_incomplete_response` classification for OpenRouter glitches, default review enforcement changed to advisory, fix progress bubble opacity and duplicate emoji. |
 | 4.3.1 | 2026-03-19 | Fix: remove semi-transparent dimming from progress chat bubbles and remove duplicate `💬` emoji that appeared in both sender label and message text. |

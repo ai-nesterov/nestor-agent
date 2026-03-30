@@ -20,6 +20,7 @@ class TestSettingsUiGuards(unittest.TestCase):
         self.assertIn("if (oaiKey && !oaiKey.includes('...')) body.OPENAI_API_KEY = oaiKey;", source)
         self.assertIn("if (antKey && !antKey.includes('...')) body.ANTHROPIC_API_KEY = antKey;", source)
         self.assertIn("if (ghToken && !ghToken.includes('...')) body.GITHUB_TOKEN = ghToken;", source)
+        self.assertIn("if (localApiKey && !localApiKey.includes('...')) body.LOCAL_MODEL_API_KEY = localApiKey;", source)
 
     def test_masked_secret_inputs_clear_on_focus(self):
         source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")

@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ouroboros.config import use_local_for_lane
 from ouroboros.task_results import (
     STATUS_CANCELLED,
     STATUS_COMPLETED,
@@ -225,13 +226,13 @@ def _switch_model(ctx: ToolContext, model: str = "", effort: str = "") -> str:
         
         import os
         use_local = False
-        if model == os.environ.get("OUROBOROS_MODEL") and os.environ.get("USE_LOCAL_MAIN", "").lower() in ("true", "1"):
+        if model == os.environ.get("OUROBOROS_MODEL") and use_local_for_lane("MAIN"):
             use_local = True
-        elif model == os.environ.get("OUROBOROS_MODEL_CODE") and os.environ.get("USE_LOCAL_CODE", "").lower() in ("true", "1"):
+        elif model == os.environ.get("OUROBOROS_MODEL_CODE") and use_local_for_lane("CODE"):
             use_local = True
-        elif model == os.environ.get("OUROBOROS_MODEL_LIGHT") and os.environ.get("USE_LOCAL_LIGHT", "").lower() in ("true", "1"):
+        elif model == os.environ.get("OUROBOROS_MODEL_LIGHT") and use_local_for_lane("LIGHT"):
             use_local = True
-        elif model == os.environ.get("OUROBOROS_MODEL_FALLBACK") and os.environ.get("USE_LOCAL_FALLBACK", "").lower() in ("true", "1"):
+        elif model == os.environ.get("OUROBOROS_MODEL_FALLBACK") and use_local_for_lane("FALLBACK"):
             use_local = True
             
         ctx.active_use_local_override = use_local

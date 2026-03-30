@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from ouroboros.config import use_local_for_lane
 
 log = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ def _summarize_round_batch(
 
     light_model = os.environ.get("OUROBOROS_MODEL_LIGHT") or DEFAULT_LIGHT_MODEL
     client = LLMClient()
-    use_local_light = os.environ.get("USE_LOCAL_LIGHT", "").lower() in ("true", "1")
+    use_local_light = use_local_for_lane("LIGHT")
     resp_msg, usage = client.chat(
         messages=[{"role": "user", "content": prompt}],
         model=light_model,

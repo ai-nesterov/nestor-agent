@@ -32,7 +32,7 @@ from ouroboros.utils import (
     utc_now_iso, read_text, append_jsonl, clip_text,
     truncate_for_log, sanitize_tool_result_for_log, sanitize_tool_args_for_log,
 )
-from ouroboros.config import resolve_effort
+from ouroboros.config import resolve_effort, use_local_for_lane
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.memory import Memory
 from ouroboros.context import (
@@ -223,7 +223,7 @@ class BackgroundConsciousness:
             for round_idx in range(1, self._max_bg_rounds + 1):
                 if self._paused:
                     break
-                _use_local_light = os.environ.get("USE_LOCAL_LIGHT", "").lower() in ("true", "1")
+                _use_local_light = use_local_for_lane("LIGHT")
                 self._emit_live_log(
                     "llm_round_started",
                     round=round_idx,

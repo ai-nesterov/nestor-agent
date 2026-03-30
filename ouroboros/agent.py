@@ -32,7 +32,7 @@ from ouroboros.tools.registry import ToolContext
 from ouroboros.memory import Memory
 from ouroboros.context import build_llm_messages
 from ouroboros.loop import run_llm_loop
-from ouroboros.config import resolve_effort
+from ouroboros.config import resolve_effort, use_local_for_lane
 from ouroboros.agent_startup_checks import (
     check_budget,
     check_uncommitted_changes,
@@ -195,7 +195,7 @@ class OuroborosAgent:
 
         self._emit_typing_start()
 
-        _use_local = os.environ.get("USE_LOCAL_MAIN", "").lower() in ("true", "1")
+        _use_local = use_local_for_lane("MAIN")
         _soft_cap = 200_000
         if _use_local:
             _local_ctx = int(os.environ.get("LOCAL_MODEL_CONTEXT_LENGTH", "0"))

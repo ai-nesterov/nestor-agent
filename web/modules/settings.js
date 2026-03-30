@@ -11,6 +11,7 @@ export function initSettings({ ws, state }) {
             <div class="form-section">
                 <h3>API Keys</h3>
                 <div class="form-row"><div class="form-field"><label>OpenRouter API Key</label><input id="s-openrouter" type="password" placeholder="sk-or-..."></div></div>
+                <div class="form-row"><div class="form-field"><label>OpenRouter Base URL</label><input id="s-openrouter-base-url" placeholder="https://openrouter.ai/api/v1"></div></div>
                 <div class="form-row"><div class="form-field"><label>OpenAI API Key (optional)</label><input id="s-openai" type="password"></div></div>
                 <div class="form-row"><div class="form-field"><label>Anthropic API Key (optional)</label><input id="s-anthropic" type="password"></div></div>
             </div>
@@ -19,6 +20,10 @@ export function initSettings({ ws, state }) {
                 <h3>Local Model</h3>
                 <div class="form-row">
                     <div class="form-field"><label>Model Source</label><input id="s-local-source" placeholder="bartowski/Llama-3.3-70B-Instruct-GGUF or /path/to/model.gguf" style="width:400px"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field"><label>Base URL (optional)</label><input id="s-local-base-url" placeholder="http://127.0.0.1:8766/v1" style="width:400px"></div>
+                    <div class="form-field"><label>API Key (optional)</label><input id="s-local-api-key" type="password" placeholder="sk-local-..." style="width:240px"></div>
                 </div>
                 <div class="form-row">
                     <div class="form-field"><label>GGUF Filename (for HF repos)</label><input id="s-local-filename" placeholder="Llama-3.3-70B-Instruct-Q4_K_M.gguf" style="width:400px"></div>
@@ -163,7 +168,7 @@ export function initSettings({ ws, state }) {
     `;
     document.getElementById('content').appendChild(page);
 
-    const secretInputIds = ['s-openrouter', 's-openai', 's-anthropic', 's-gh-token'];
+    const secretInputIds = ['s-openrouter', 's-openai', 's-anthropic', 's-gh-token', 's-local-api-key'];
     secretInputIds.forEach((id) => {
         const input = document.getElementById(id);
         input.addEventListener('focus', () => {
@@ -173,6 +178,7 @@ export function initSettings({ ws, state }) {
 
     function applySettings(s) {
         if (s.OPENROUTER_API_KEY) document.getElementById('s-openrouter').value = s.OPENROUTER_API_KEY;
+        document.getElementById('s-openrouter-base-url').value = s.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
         if (s.OPENAI_API_KEY) document.getElementById('s-openai').value = s.OPENAI_API_KEY;
         if (s.ANTHROPIC_API_KEY) document.getElementById('s-anthropic').value = s.ANTHROPIC_API_KEY;
         if (s.OUROBOROS_MODEL) document.getElementById('s-model').value = s.OUROBOROS_MODEL;
@@ -195,6 +201,8 @@ export function initSettings({ ws, state }) {
         if (s.GITHUB_TOKEN) document.getElementById('s-gh-token').value = s.GITHUB_TOKEN;
         if (s.GITHUB_REPO) document.getElementById('s-gh-repo').value = s.GITHUB_REPO;
         if (s.LOCAL_MODEL_SOURCE) document.getElementById('s-local-source').value = s.LOCAL_MODEL_SOURCE;
+        if (s.LOCAL_MODEL_BASE_URL) document.getElementById('s-local-base-url').value = s.LOCAL_MODEL_BASE_URL;
+        if (s.LOCAL_MODEL_API_KEY) document.getElementById('s-local-api-key').value = s.LOCAL_MODEL_API_KEY;
         if (s.LOCAL_MODEL_FILENAME) document.getElementById('s-local-filename').value = s.LOCAL_MODEL_FILENAME;
         if (s.LOCAL_MODEL_PORT) document.getElementById('s-local-port').value = s.LOCAL_MODEL_PORT;
         if (s.LOCAL_MODEL_N_GPU_LAYERS != null) document.getElementById('s-local-gpu-layers').value = s.LOCAL_MODEL_N_GPU_LAYERS;
@@ -292,6 +300,7 @@ export function initSettings({ ws, state }) {
 
     document.getElementById('btn-save-settings').addEventListener('click', async () => {
         const body = {
+            OPENROUTER_BASE_URL: document.getElementById('s-openrouter-base-url').value.trim(),
             OUROBOROS_MODEL: document.getElementById('s-model').value,
             OUROBOROS_MODEL_CODE: document.getElementById('s-model-code').value,
             OUROBOROS_MODEL_LIGHT: document.getElementById('s-model-light').value,
@@ -310,6 +319,7 @@ export function initSettings({ ws, state }) {
             OUROBOROS_TOOL_TIMEOUT_SEC: parseInt(document.getElementById('s-tool-timeout').value) || 120,
             GITHUB_REPO: document.getElementById('s-gh-repo').value,
             LOCAL_MODEL_SOURCE: document.getElementById('s-local-source').value,
+            LOCAL_MODEL_BASE_URL: document.getElementById('s-local-base-url').value.trim(),
             LOCAL_MODEL_FILENAME: document.getElementById('s-local-filename').value,
             LOCAL_MODEL_PORT: parseInt(document.getElementById('s-local-port').value) || 8766,
             LOCAL_MODEL_N_GPU_LAYERS: parseInt(document.getElementById('s-local-gpu-layers').value),
@@ -328,6 +338,8 @@ export function initSettings({ ws, state }) {
         if (antKey && !antKey.includes('...')) body.ANTHROPIC_API_KEY = antKey;
         const ghToken = document.getElementById('s-gh-token').value;
         if (ghToken && !ghToken.includes('...')) body.GITHUB_TOKEN = ghToken;
+        const localApiKey = document.getElementById('s-local-api-key').value;
+        if (localApiKey && !localApiKey.includes('...')) body.LOCAL_MODEL_API_KEY = localApiKey;
 
         try {
             const resp = await fetch('/api/settings', {

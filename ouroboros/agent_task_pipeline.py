@@ -90,12 +90,37 @@ def emit_task_results(
     start_time: float, drive_logs: pathlib.Path,
 ) -> None:
     """Emit all end-of-task events to supervisor and run post-task processing."""
-    pending_events.append({
-        "type": "send_message", "chat_id": task["chat_id"],
-        "text": text or "\u200b", "log_text": text or "",
-        "format": "markdown",
-        "task_id": task.get("id"), "ts": utc_now_iso(),
-    })
+    task_type = str(task.get("type") or "").lower()
+    
+    # Special handling for Telegram messages
+    if task_type == "telegram_message":
+        telegram_chat_id = task.get("chat_id")
+        if telegram_chat_id:
+            try:
+                from ouroboros.tools.telegram import telegram_send_message
+                # Truncate very long responses for Telegram (4096 char limit)
+                truncated_text = (text or "\u200b")[:4090] + "..." if len(text or "") > 4090 else (text or "\u200b")
+                telegram_send_message(str(telegram_chat_id), truncated_text)
+                log.info("Telegram response sent to chat %s", telegram_chat_id)
+            except Exception as e:
+                log.error("Failed to send Telegram response: %s", e, exc_info=True)
+                # Fallback: still emit event for logging
+                pending_events.append({
+                    "type": "send_message", "chat_id": task.get("chat_id"),
+                    "text": f"[Telegram send failed: {e}] {text or ''}",
+                    "log_text": text or "", "format": "markdown",
+                    "task_id": task.get("id"), "ts": utc_now_iso(),
+                })
+        else:
+            log.warning("Telegram message task missing chat_id")
+    else:
+        # Regular chat message
+        pending_events.append({
+            "type": "send_message", "chat_id": task["chat_id"],
+            "text": text or "\u200b", "log_text": text or "",
+            "format": "markdown",
+            "task_id": task.get("id"), "ts": utc_now_iso(),
+        })
 
     duration_sec = round(time.time() - start_time, 3)
     n_tool_calls = len(llm_trace.get("tool_calls", []))
@@ -197,8 +222,8 @@ def _run_task_summary(env, llm, task, usage, llm_trace, drive_logs):
     """Generate a detailed task summary and inject it into chat.jsonl."""
     try:
         from ouroboros.consolidator import (
-            CONSOLIDATION_MODEL,
             CONSOLIDATION_REASONING_EFFORT,
+            resolve_consolidation_model,
         )
         task_id = task.get("id", "unknown")
         goal = _truncate_with_notice(task.get("text", ""), 500)
@@ -211,10 +236,12 @@ def _run_task_summary(env, llm, task, usage, llm_trace, drive_logs):
             cost=cost, trace_summary=_truncate_with_notice(trace, 3000),
         )
         try:
-            msg, _usage = llm.chat(messages=[{"role": "user", "content": prompt}],
-                                   model=CONSOLIDATION_MODEL,
-                                   reasoning_effort=CONSOLIDATION_REASONING_EFFORT,
-                                   max_tokens=2048)
+            msg, _usage = llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model=resolve_consolidation_model(),
+                reasoning_effort=CONSOLIDATION_REASONING_EFFORT,
+                max_tokens=2048,
+            )
             summary_text = (msg.get("content") or "").strip()
             if _usage.get("cost"):
                 try:

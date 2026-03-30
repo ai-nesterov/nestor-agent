@@ -32,6 +32,8 @@ PORT_FILE = DATA_DIR / "state" / "server_port"
 RESTART_EXIT_CODE = 42
 PANIC_EXIT_CODE = 99
 AGENT_SERVER_PORT = 8765
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LOCAL_MODEL_PORT = 8766
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +41,14 @@ AGENT_SERVER_PORT = 8765
 # ---------------------------------------------------------------------------
 SETTINGS_DEFAULTS = {
     "OPENROUTER_API_KEY": "",
+    "OPENROUTER_BASE_URL": DEFAULT_OPENROUTER_BASE_URL,
     "OPENAI_API_KEY": "",
     "ANTHROPIC_API_KEY": "",
-    "OUROBOROS_MODEL": "anthropic/claude-opus-4.6",
-    "OUROBOROS_MODEL_CODE": "anthropic/claude-opus-4.6",
-    "OUROBOROS_MODEL_LIGHT": "anthropic/claude-sonnet-4.6",
-    "OUROBOROS_MODEL_FALLBACK": "anthropic/claude-sonnet-4.6",
+    "OUROBOROS_MODEL": "Qwen/Qwen3.5-27B",
+    "OUROBOROS_MODEL_CODE": "Qwen/Qwen3-Coder-Next",
+    "OUROBOROS_MODEL_LIGHT": "Qwen/Qwen3.5-27B",
+    "OUROBOROS_MODEL_CONSOLIDATION": "Openai/Gpt-oss-120b",
+    "OUROBOROS_MODEL_FALLBACK": "Openai/Gpt-oss-120b",
     "CLAUDE_CODE_MODEL": "opus",
     "OUROBOROS_MAX_WORKERS": 5,
     "TOTAL_BUDGET": 10.0,
@@ -68,20 +72,81 @@ SETTINGS_DEFAULTS = {
     "OUROBOROS_EFFORT_CONSCIOUSNESS": "low",
     "GITHUB_TOKEN": "",
     "GITHUB_REPO": "",
+    # Telegram bot integration
+    "TELEGRAM_BOT_TOKEN": "",
+    "TELEGRAM_BOT_ENABLED": "false",
+    "TELEGRAM_WEBHOOK_URL": "",
     # Local model (llama-cpp-python server)
     "LOCAL_MODEL_SOURCE": "",
     "LOCAL_MODEL_FILENAME": "",
-    "LOCAL_MODEL_PORT": 8766,
+    "LOCAL_MODEL_PORT": DEFAULT_LOCAL_MODEL_PORT,
+    "LOCAL_MODEL_BASE_URL": "https://inference.airi.net:46783/v1",
+    "LOCAL_MODEL_API_KEY": "",
     "LOCAL_MODEL_N_GPU_LAYERS": 0,
-    "LOCAL_MODEL_CONTEXT_LENGTH": 16384,
+    "LOCAL_MODEL_CONTEXT_LENGTH": 32768,
     "LOCAL_MODEL_CHAT_FORMAT": "",
-    "USE_LOCAL_MAIN": False,
-    "USE_LOCAL_CODE": False,
-    "USE_LOCAL_LIGHT": False,
-    "USE_LOCAL_FALLBACK": False,
+    "USE_LOCAL_MAIN": True,
+    "USE_LOCAL_CODE": True,
+    "USE_LOCAL_LIGHT": True,
+    "USE_LOCAL_FALLBACK": True,
 }
 
 _VALID_EFFORTS = ("none", "low", "medium", "high")
+_TRUE_VALUES = ("true", "1", "yes", "on")
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in _TRUE_VALUES
+
+
+def _settings_value(settings: Optional[dict], key: str, default: object = "") -> object:
+    if settings is not None:
+        return settings.get(key, default)
+    return os.environ.get(key, default)
+
+
+def has_openrouter_config(settings: Optional[dict] = None) -> bool:
+    """Return True when cloud OpenRouter backend is configured."""
+    return bool(str(_settings_value(settings, "OPENROUTER_API_KEY", "")).strip())
+
+
+def has_local_routing_enabled(settings: Optional[dict] = None) -> bool:
+    """Return True when any model lane is configured to use local routing."""
+    return any(
+        _truthy(_settings_value(settings, k, False))
+        for k in ("USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK")
+    )
+
+
+def has_local_model_config(settings: Optional[dict] = None) -> bool:
+    """Return True when local model backend is configured via base URL or legacy path."""
+    explicit_base = bool(str(_settings_value(settings, "LOCAL_MODEL_BASE_URL", "")).strip())
+    if explicit_base:
+        return True
+
+    local_source = bool(str(_settings_value(settings, "LOCAL_MODEL_SOURCE", "")).strip())
+    routing_enabled = has_local_routing_enabled(settings)
+    port = str(_settings_value(settings, "LOCAL_MODEL_PORT", "")).strip()
+    return bool(port) and (local_source or routing_enabled)
+
+
+def has_configured_llm_backend(settings: Optional[dict] = None) -> bool:
+    """Return True when any usable LLM backend is configured."""
+    return has_openrouter_config(settings) or has_local_model_config(settings)
+
+
+def use_local_for_lane(lane: str, settings: Optional[dict] = None) -> bool:
+    """Resolve whether a lane should route to local backend.
+
+    Preserves explicit USE_LOCAL_* behavior. If cloud is unavailable but a local
+    backend is configured, auto-falls back to local for core continuity.
+    """
+    lane_key = f"USE_LOCAL_{str(lane or '').upper()}"
+    if _truthy(_settings_value(settings, lane_key, False)):
+        return True
+    if has_openrouter_config(settings):
+        return False
+    return has_local_model_config(settings)
 
 
 def resolve_effort(task_type: str) -> str:
@@ -118,6 +183,34 @@ def get_review_enforcement() -> str:
     default_val = str(SETTINGS_DEFAULTS["OUROBOROS_REVIEW_ENFORCEMENT"])
     raw = (os.environ.get("OUROBOROS_REVIEW_ENFORCEMENT", default_val) or default_val).strip().lower()
     return raw if raw in {"advisory", "blocking"} else default_val
+
+
+def resolve_openrouter_base_url(base_url: Optional[str] = None) -> str:
+    """Resolve OpenRouter base URL from arg -> env -> defaults."""
+    if base_url is not None and str(base_url).strip():
+        return str(base_url).strip().rstrip("/")
+    env_val = os.environ.get("OPENROUTER_BASE_URL", "")
+    if env_val.strip():
+        return env_val.strip().rstrip("/")
+    return str(DEFAULT_OPENROUTER_BASE_URL).rstrip("/")
+
+
+def resolve_local_model_base_url(base_url: Optional[str] = None, port: Optional[int] = None) -> str:
+    """Resolve local model OpenAI-compatible base URL with legacy fallback."""
+    if base_url is not None and str(base_url).strip():
+        return str(base_url).strip().rstrip("/")
+    env_val = os.environ.get("LOCAL_MODEL_BASE_URL", "")
+    if env_val.strip():
+        return env_val.strip().rstrip("/")
+    resolved_port = int(port or os.environ.get("LOCAL_MODEL_PORT", str(DEFAULT_LOCAL_MODEL_PORT)))
+    return f"http://127.0.0.1:{resolved_port}/v1"
+
+
+def resolve_local_model_api_key(api_key: Optional[str] = None) -> str:
+    """Resolve local model API key from arg -> env."""
+    if api_key is not None:
+        return str(api_key)
+    return str(os.environ.get("LOCAL_MODEL_API_KEY", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -204,10 +297,12 @@ def save_settings(settings: dict) -> None:
 def apply_settings_to_env(settings: dict) -> None:
     """Push settings into environment variables for supervisor modules."""
     env_keys = [
-        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
         "OUROBOROS_MODEL", "OUROBOROS_MODEL_CODE", "OUROBOROS_MODEL_LIGHT",
+        "OUROBOROS_MODEL_CONSOLIDATION",
         "OUROBOROS_MODEL_FALLBACK", "CLAUDE_CODE_MODEL",
         "TOTAL_BUDGET", "GITHUB_TOKEN", "GITHUB_REPO",
+        "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_ENABLED", "TELEGRAM_WEBHOOK_URL",
         "OUROBOROS_TOOL_TIMEOUT_SEC",
         "OUROBOROS_BG_MAX_ROUNDS", "OUROBOROS_BG_WAKEUP_MIN", "OUROBOROS_BG_WAKEUP_MAX",
         "OUROBOROS_EVO_COST_THRESHOLD", "OUROBOROS_WEBSEARCH_MODEL",
@@ -215,6 +310,7 @@ def apply_settings_to_env(settings: dict) -> None:
         "OUROBOROS_EFFORT_TASK", "OUROBOROS_EFFORT_EVOLUTION",
         "OUROBOROS_EFFORT_REVIEW", "OUROBOROS_EFFORT_CONSCIOUSNESS",
         "LOCAL_MODEL_SOURCE", "LOCAL_MODEL_FILENAME",
+        "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY",
         "LOCAL_MODEL_PORT", "LOCAL_MODEL_N_GPU_LAYERS", "LOCAL_MODEL_CONTEXT_LENGTH",
         "LOCAL_MODEL_CHAT_FORMAT",
         "USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK",

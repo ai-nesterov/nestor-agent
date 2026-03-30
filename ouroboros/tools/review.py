@@ -159,8 +159,20 @@ async def _multi_model_review_async(content: str, prompt: str,
         return {"error": f"Too many models ({len(models)}). Maximum is {MAX_MODELS}."}
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        return {"error": "OPENROUTER_API_KEY not set"}
+    if not _cfg.has_openrouter_config():
+        if _cfg.has_local_model_config():
+            return {
+                "error": (
+                    "Cloud LLM backend is not configured for review. "
+                    "Multi-model review currently requires OpenRouter-compatible cloud access."
+                )
+            }
+        return {
+            "error": (
+                "No LLM provider configured. Configure OpenRouter API key "
+                "or local model backend."
+            )
+        }
 
     bible_text = _load_bible()
     if bible_text:
@@ -637,7 +649,7 @@ def _run_unified_review(ctx: ToolContext, commit_message: str,
             "⚠️ REVIEW_BLOCKED: Review infrastructure failed — commit cannot proceed "
             "without a successful review.\n"
             f"Error: {e}\n"
-            "Check OPENROUTER_API_KEY, network connectivity, and retry."
+            "Check cloud LLM configuration (OpenRouter API key), network connectivity, and retry."
         )
         return _handle_review_block_or_warning(
             ctx, blocking_review, blocked_msg,
@@ -650,7 +662,7 @@ def _run_unified_review(ctx: ToolContext, commit_message: str,
             "⚠️ REVIEW_BLOCKED: Review service returned an error — commit cannot proceed "
             "without a successful review.\n"
             f"Error: {result['error']}\n"
-            "Check OPENROUTER_API_KEY, network connectivity, and retry."
+            "Check cloud LLM configuration (OpenRouter API key), network connectivity, and retry."
         )
         return _handle_review_block_or_warning(
             ctx, blocking_review, blocked_msg,
