@@ -633,8 +633,12 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     if tid in RUNNING:
         return
     existing_result = load_task_result(ctx.DRIVE_ROOT, tid)
-    if isinstance(existing_result, dict) and str(existing_result.get("status") or "").strip():
-        return
+    if isinstance(existing_result, dict):
+        existing_status = str(existing_result.get("status") or "").strip().lower()
+        # `requested` is written by the schedule_task tool before supervisor admission.
+        # It must not block the first handling pass.
+        if existing_status and existing_status not in {"requested"}:
+            return
 
     # Check depth limit
     if depth > 3:

@@ -146,6 +146,59 @@ def test_handle_schedule_task_idempotent_by_task_id(tmp_path, monkeypatch):
     assert pending[0]["id"] == "idem001"
 
 
+def test_handle_schedule_task_allows_requested_status_seed(tmp_path):
+    from supervisor import events as ev_module
+    from supervisor import queue as q_module
+    from ouroboros.task_results import STATUS_REQUESTED, write_task_result
+
+    pending = []
+    running = {}
+    seq = {"value": 0}
+    q_module.init(tmp_path, soft_timeout=60, hard_timeout=120)
+    q_module.init_queue_refs(pending, running, seq)
+
+    write_task_result(
+        tmp_path,
+        "seed001",
+        STATUS_REQUESTED,
+        description="Seeded requested status",
+        result="Task request queued. Awaiting supervisor acceptance.",
+    )
+
+    class FakeCtx:
+        DRIVE_ROOT = tmp_path
+        PENDING = pending
+        RUNNING = running
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def send_with_budget(self, chat_id, text, **kwargs):
+            return None
+
+        def enqueue_task(self, task):
+            return q_module.enqueue_task(task)
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+    ev_module._handle_schedule_task(
+        {
+            "type": "schedule_task",
+            "task_id": "seed001",
+            "description": "Seeded requested status",
+            "depth": 1,
+        },
+        FakeCtx(),
+    )
+
+    assert len(pending) == 1
+    assert pending[0]["id"] == "seed001"
+
+
 def test_handle_text_response_keeps_full_reasoning_note():
     from ouroboros.loop import _handle_text_response
 
