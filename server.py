@@ -605,9 +605,10 @@ async def api_executor_status(request: Request) -> JSONResponse:
             )
             out = (proc.stdout or "").strip()
             err = (proc.stderr or "").strip()
+            merged = "\n".join([p for p in (out, err) if p]).strip()
             if proc.returncode != 0:
-                return False, (err or out or f"exit={proc.returncode}")
-            return True, out
+                return False, (merged or f"exit={proc.returncode}")
+            return True, merged
         except Exception as exc:
             return False, str(exc)
 
