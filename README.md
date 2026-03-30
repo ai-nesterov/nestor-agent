@@ -247,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.6.6 | 2026-03-30 | Fix httpx client context manager: `get_http_client()` returns a coroutine that must be awaited before use as async context manager. Resolves TypeError "'coroutine' object does not support the asynchronous context manager protocol".
 | 4.6.5 | 2026-03-30 | Fix LoggingMiddleware signature for aiogram 3.x compatibility: middleware __call__ must accept (handler, event, data) instead of (handler, event). Resolves TypeError when bot processes messages.
 | 4.6.4 | 2026-03-30 | Add comprehensive test suite for telegram_bot.py (30+ tests): configuration loading, handler registration, middleware logging, integration tests, and regression tests for known bugs (Command() filter, import errors). Added pytest-asyncio dependency. Tests prevent future regressions. |
 | 4.6.3 | 2026-03-30 | Fix telegram_bot.py startup crash: `Command()` without arguments raises ValueError in aiogram 3.x. Replaced `~Command()` with `~F.text.startswith("/")` to filter slash commands properly. Bot now starts successfully. |

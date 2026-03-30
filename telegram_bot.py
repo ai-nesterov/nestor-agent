@@ -224,7 +224,7 @@ async def _forward_to_server(message: Message, text: str):
     }
     
     try:
-        async with get_http_client() as client:
+        async with await get_http_client() as client:
             # Retry logic with exponential backoff
             for attempt in range(3):
                 try:
