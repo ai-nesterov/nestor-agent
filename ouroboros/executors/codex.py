@@ -31,6 +31,8 @@ class CodexRunner:
         cli_bin: str = "codex",
         sandbox_mode: str = "workspace-write",
         approval_policy: str = "on-request",
+        full_auto: bool = True,
+        dangerously_bypass_approvals_and_sandbox: bool = False,
     ):
         self.model = model
         self.auth_mode = auth_mode
@@ -38,6 +40,8 @@ class CodexRunner:
         self.cli_bin = cli_bin
         self.sandbox_mode = sandbox_mode
         self.approval_policy = approval_policy
+        self.full_auto = bool(full_auto)
+        self.dangerously_bypass_approvals_and_sandbox = bool(dangerously_bypass_approvals_and_sandbox)
 
     def _git(self, work_dir: Path, *args: str) -> str:
         proc = subprocess.run(["git", *args], cwd=str(work_dir), capture_output=True, text=True, check=True)
@@ -176,12 +180,18 @@ class CodexRunner:
             self.cli_bin,
             "exec",
             prompt,
+            "--sandbox",
+            self.sandbox_mode,
             "--json",
             "--output-schema",
             str(schema_path),
             "-o",
             str(final_out_path),
         ]
+        if self.full_auto:
+            cmd.append("--full-auto")
+        if self.dangerously_bypass_approvals_and_sandbox:
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
 
         try:
             proc = subprocess.run(

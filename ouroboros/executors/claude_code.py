@@ -28,11 +28,15 @@ class ClaudeCodeRunner:
         auth_mode: str = "subscription_only",
         timeout_sec: int = 300,
         cli_bin: str = "claude",
+        permission_mode: str = "acceptEdits",
+        dangerously_skip_permissions: bool = False,
     ):
         self.model = model
         self.auth_mode = auth_mode
         self.timeout_sec = int(timeout_sec)
         self.cli_bin = cli_bin
+        self.permission_mode = str(permission_mode or "acceptEdits")
+        self.dangerously_skip_permissions = bool(dangerously_skip_permissions)
 
     def _auth_mode_allowed(self, env: Dict[str, str]) -> tuple[bool, str, Dict[str, str]]:
         anth_key = str(env.get("ANTHROPIC_API_KEY") or "").strip()
@@ -64,7 +68,11 @@ class ClaudeCodeRunner:
             "json",
             "--model",
             self.model,
+            "--permission-mode",
+            self.permission_mode,
         ]
+        if self.dangerously_skip_permissions:
+            cmd.append("--dangerously-skip-permissions")
         proc = subprocess.run(
             cmd,
             cwd=str(work_dir),
