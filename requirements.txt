@@ -13,3 +13,5 @@ playwright-stealth
 # optional: telegram bot
 aiogram>=3.0.0
 httpx
+# testing
+pytest-asyncio
