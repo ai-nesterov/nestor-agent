@@ -63,7 +63,7 @@ if not TELEGRAM_INTERNAL_SECRET:
     log.error("TELEGRAM_INTERNAL_SECRET not configured. Exiting.")
     sys.exit(1)
 
-log.info("Telegram bot starting on port %s", TELEGRAM_BOT_PORT)
+log.info("Telegram bot starting (polling mode)...")
 
 # ---------------------------------------------------------------------------
 # Bot initialization
