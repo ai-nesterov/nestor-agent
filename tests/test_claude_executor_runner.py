@@ -91,3 +91,53 @@ def test_protected_path_changes_are_blocked(tmp_path, monkeypatch):
     assert "protected path" in result.summary.lower()
 
     manager.cleanup_worktree(handle)
+
+
+def test_runner_detects_staged_changes(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    bin_dir = _install_fake_claude(tmp_path)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH','')}")
+
+    manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
+    handle = manager.prepare_worktree("t-run-4", "ouroboros", "claude_code")
+
+    target = handle.path / "main.py"
+    monkeypatch.setenv("FAKE_CLAUDE_TOUCH_FILE", str(target))
+    monkeypatch.setenv("FAKE_CLAUDE_STAGE_ALL", "1")
+    runner = ClaudeCodeRunner(model="sonnet", auth_mode="auto", timeout_sec=30)
+    result = runner.run({"id": "t-run-4", "description": "change and stage file"}, handle, tmp_path / "artifacts4")
+
+    assert result.status == "completed"
+    assert "main.py" in result.changed_files
+    assert result.diff_stat["files"] >= 1
+
+    manager.cleanup_worktree(handle)
+
+
+def test_review_task_without_diff_is_allowed(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    bin_dir = _install_fake_claude(tmp_path)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH','')}")
+    monkeypatch.delenv("FAKE_CLAUDE_TOUCH_FILE", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_STAGE_ALL", raising=False)
+    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "Code review findings summary")
+
+    manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
+    handle = manager.prepare_worktree("t-run-5", "ouroboros", "claude_code")
+
+    runner = ClaudeCodeRunner(model="sonnet", auth_mode="auto", timeout_sec=30)
+    result = runner.run(
+        {
+            "id": "t-run-5",
+            "type": "review",
+            "description": "Code review: analyze telegram_bot.py for issues",
+        },
+        handle,
+        tmp_path / "artifacts5",
+    )
+
+    assert result.status == "completed"
+    assert result.changed_files == []
+    assert "stop hook policy" not in result.result_text.lower()
+
+    manager.cleanup_worktree(handle)

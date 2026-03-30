@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import subprocess
 import sys
 
 
@@ -20,6 +21,9 @@ if os.environ.get("FAKE_CLAUDE_TOUCH_FILE"):
 
 if os.environ.get("FAKE_CLAUDE_TOUCH_PROTECTED") == "1":
     pathlib.Path("BIBLE.md").write_text("mutated\n", encoding="utf-8")
+
+if os.environ.get("FAKE_CLAUDE_STAGE_ALL") == "1":
+    subprocess.run(["git", "add", "-A"], check=False)
 
 exit_code = int(os.environ.get("FAKE_CLAUDE_EXIT", "0"))
 

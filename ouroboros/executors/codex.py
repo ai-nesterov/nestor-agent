@@ -55,8 +55,9 @@ class CodexRunner:
             text=True,
             check=False,
         )
-        changed = [x for x in self._git(work_dir, "diff", "--name-only").splitlines() if x.strip()]
-        numstat = self._git(work_dir, "diff", "--numstat")
+        # Compare against HEAD so both staged and unstaged edits are counted.
+        changed = [x for x in self._git(work_dir, "diff", "--name-only", "HEAD").splitlines() if x.strip()]
+        numstat = self._git(work_dir, "diff", "--numstat", "HEAD")
         files = ins = dele = 0
         for line in numstat.splitlines():
             parts = line.split("\t")

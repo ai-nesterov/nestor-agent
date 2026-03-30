@@ -122,8 +122,9 @@ class ClaudeCodeRunner:
             text=True,
             check=False,
         )
-        changed = [x for x in self._git(work_dir, "diff", "--name-only").splitlines() if x.strip()]
-        numstat = self._git(work_dir, "diff", "--numstat")
+        # Compare against HEAD so both staged and unstaged edits are counted.
+        changed = [x for x in self._git(work_dir, "diff", "--name-only", "HEAD").splitlines() if x.strip()]
+        numstat = self._git(work_dir, "diff", "--numstat", "HEAD")
         files = 0
         ins = 0
         dele = 0
@@ -143,6 +144,57 @@ class ClaudeCodeRunner:
         for path in touched:
             subprocess.run(["git", "checkout", "--", path], cwd=str(work_dir), check=False)
         return touched
+
+    def _expects_code_changes(self, task: dict) -> bool:
+        constraints = task.get("constraints") if isinstance(task.get("constraints"), dict) else {}
+        if isinstance(constraints, dict):
+            if constraints.get("allow_no_change") is True:
+                return False
+            if constraints.get("require_code_changes") is True:
+                return True
+
+        task_type = str(task.get("type") or task.get("task_type") or "").strip().lower()
+        task_kind = str(task.get("task_kind") or "").strip().lower()
+        caller_class = str(task.get("caller_class") or "").strip().lower()
+        if task_type == "review" or caller_class == "review":
+            return False
+        if any(marker in task_kind for marker in ("review", "plan", "analysis")):
+            return False
+
+        text = " ".join(
+            [
+                str(task.get("description") or ""),
+                str(task.get("text") or ""),
+                str(task.get("context") or ""),
+            ]
+        ).lower()
+        analysis_markers = (
+            "code review",
+            "review",
+            "analy",
+            "проанализ",
+            "аудит",
+            "план",
+            "plan",
+            "design",
+            "architecture",
+        )
+        code_change_markers = (
+            "create file",
+            "создай файл",
+            "write file",
+            "add ",
+            "fix ",
+            "implement",
+            "измени",
+            "исправ",
+            "рефактор",
+        )
+        has_analysis_intent = any(m in text for m in analysis_markers)
+        has_change_intent = any(m in text for m in code_change_markers)
+        if has_analysis_intent and not has_change_intent:
+            return False
+        return True
 
     def run(self, task: dict, worktree: WorktreeHandle, artifact_dir: Path) -> ExecutorResult:
         started_at = utc_now_iso()
@@ -216,7 +268,12 @@ class ClaudeCodeRunner:
             changed_files, diff_stat = self._collect_diff(worktree.path)
 
         status = "completed" if run_out.returncode == 0 and not touched_protected else "failed"
-        if status == "completed" and not changed_files and "no-change" not in result_text.lower():
+        if (
+            status == "completed"
+            and not changed_files
+            and "no-change" not in result_text.lower()
+            and self._expects_code_changes(task)
+        ):
             status = "failed"
             result_text = f"{result_text}\n\nStop hook policy: no diff and no explicit no-change reason."
 

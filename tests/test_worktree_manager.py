@@ -58,6 +58,25 @@ def test_collect_patch_includes_untracked_files(tmp_path):
     manager.cleanup_worktree(handle)
 
 
+def test_collect_patch_includes_staged_only_changes(tmp_path):
+    repo = _init_repo(tmp_path)
+    manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
+
+    handle = manager.prepare_worktree(task_id="t-staged", base_branch="ouroboros", executor="codex")
+    target = handle.path / "app.txt"
+    target.write_text("v2\n", encoding="utf-8")
+    _run(["git", "add", "app.txt"], handle.path)
+
+    patch_path = manager.collect_patch(handle, tmp_path / "artifacts")
+    patch = patch_path.read_text(encoding="utf-8")
+    changed = (tmp_path / "artifacts" / "changed_files.json").read_text(encoding="utf-8")
+
+    assert "app.txt" in patch
+    assert "app.txt" in changed
+
+    manager.cleanup_worktree(handle)
+
+
 def test_parallel_worktrees_do_not_conflict(tmp_path):
     repo = _init_repo(tmp_path)
     manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")

@@ -55,7 +55,8 @@ class WorktreeManager:
 
     def _changed_paths_including_untracked(self, cwd: Path) -> list[str]:
         self._prime_index_for_untracked(cwd)
-        changed = self._git("diff", "--name-only", cwd=cwd).splitlines()
+        # Compare against HEAD to include both staged and unstaged edits.
+        changed = self._git("diff", "--name-only", "HEAD", cwd=cwd).splitlines()
         return [p.strip() for p in changed if p.strip()]
 
     def prepare_worktree(self, task_id: str, base_branch: str | None, executor: str) -> WorktreeHandle:
@@ -103,7 +104,7 @@ class WorktreeManager:
         self._prime_index_for_untracked(handle.path)
 
         diff_proc = subprocess.run(
-            ["git", "diff", "--binary"],
+            ["git", "diff", "--binary", "HEAD"],
             cwd=str(handle.path),
             capture_output=True,
             text=True,
@@ -121,7 +122,7 @@ class WorktreeManager:
         files = 0
         insertions = 0
         deletions = 0
-        numstat = self._git("diff", "--numstat", cwd=handle.path)
+        numstat = self._git("diff", "--numstat", "HEAD", cwd=handle.path)
         for line in numstat.splitlines():
             parts = line.split("\t")
             if len(parts) < 3:
