@@ -164,6 +164,21 @@ export function initLogs({ ws, state }) {
             };
         }
 
+        if (t === 'executor_run' || t === 'executor_result' || t === 'executor_task') {
+            return {
+                ...base,
+                phase: evt.status || 'executor',
+                headline: `${evt.executor || 'external'} ${evt.status || 'run'}`.trim(),
+                body: shortText(evt.summary || evt.result || '', 260),
+                meta: [
+                    evt.task_id ? `task=${evt.task_id}` : '',
+                    evt.auth_mode ? `auth=${evt.auth_mode}` : '',
+                    evt.duration_sec ? formatDuration(evt.duration_sec) : '',
+                    evt.changed_files_count != null ? `files=${evt.changed_files_count}` : '',
+                ].filter(Boolean),
+            };
+        }
+
         if (t === 'context_building_started') {
             return {
                 ...base,
