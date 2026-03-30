@@ -485,6 +485,8 @@ def _claude_code_edit(ctx: ToolContext, prompt: str, cwd: str = "",
                       budget: float = 1.0) -> str:
     """Delegate code edits to Claude Code CLI."""
     from ouroboros.tools.git import _acquire_git_lock, _release_git_lock
+    from ouroboros.executors.claude_code import ClaudeCodeRunner
+    from ouroboros.executors.worktree import WorktreeHandle
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -516,34 +518,41 @@ def _claude_code_edit(ctx: ToolContext, prompt: str, cwd: str = "",
             f"Git branch: {ctx.branch_dev}. Do NOT commit or push.\n\n"
             f"{prompt}"
         )
+        base_sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=ctx.repo_dir)
+        task_id = str(getattr(ctx, "task_id", "") or "claude_code_edit")
+        artifact_dir = pathlib.Path(ctx.drive_root) / "executor_runs" / task_id
+        handle = WorktreeHandle(
+            task_id=task_id,
+            executor="claude_code",
+            branch=ctx.branch_dev,
+            base_branch=ctx.branch_dev,
+            base_sha=base_sha,
+            path=pathlib.Path(work_dir),
+        )
+        runner = ClaudeCodeRunner(model=model, auth_mode="api_only", timeout_sec=300)
+        result = runner.run(
+            {"id": task_id, "description": full_prompt, "context": ""},
+            worktree=handle,
+            artifact_dir=artifact_dir,
+        )
+        if result.status != "completed":
+            return f"⚠️ CLAUDE_CODE_FAILED: {result.summary}\n{result.result_text}".strip()
 
-        env = os.environ.copy()
-        env["ANTHROPIC_API_KEY"] = api_key
-        try:
-            if hasattr(os, "geteuid") and os.geteuid() == 0:
-                env.setdefault("IS_SANDBOX", "1")
-        except Exception:
-            log.debug("Failed to check geteuid for sandbox detection", exc_info=True)
-            pass
+        if isinstance(result.usage.get("cost_usd"), (int, float)):
+            ctx.pending_events.append({
+                "type": "llm_usage",
+                "provider": "claude_code_cli",
+                "model": model,
+                "api_key_type": "anthropic",
+                "model_category": "claude_code",
+                "usage": {"cost": float(result.usage["cost_usd"])},
+                "cost": float(result.usage["cost_usd"]),
+                "source": "claude_code_edit",
+                "ts": utc_now_iso(),
+                "category": "task",
+            })
 
-        _ensure_path()
-        env["PATH"] = os.environ["PATH"]
-
-        res = _run_claude_cli(work_dir, full_prompt, env,
-                              model=model, budget=budget)
-
-        if res.returncode != 0 and _should_retry_claude_first_run(res.stdout or "", freshly_installed):
-            ctx.emit_progress_fn("Claude CLI returned a transient first-run auth error. Retrying once...")
-            time.sleep(2)
-            res = _run_claude_cli(work_dir, full_prompt, env,
-                                  model=model, budget=budget)
-
-        stdout = (res.stdout or "").strip()
-        if res.returncode != 0:
-            return _format_claude_code_error(res)
-        if not stdout:
-            stdout = "OK: Claude Code completed with empty output."
-
+        stdout = result.result_text or "OK: Claude Code completed."
         warning = _check_uncommitted_changes(ctx.repo_dir)
         if warning:
             stdout += warning
@@ -555,7 +564,7 @@ def _claude_code_edit(ctx: ToolContext, prompt: str, cwd: str = "",
     finally:
         _release_git_lock(lock)
 
-    return _parse_claude_output(stdout, ctx)
+    return stdout
 
 
 def get_tools() -> List[ToolEntry]:
