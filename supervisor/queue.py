@@ -13,6 +13,7 @@ import pathlib
 import threading
 import time
 import uuid
+from glob import glob
 from typing import Any, Dict, List, Optional, Tuple
 
 from supervisor.state import (
@@ -118,6 +119,95 @@ def enqueue_task(task: Dict[str, Any], front: bool = False) -> Dict[str, Any]:
     PENDING.append(t)
     sort_pending()
     return t
+
+
+def reconcile_orphaned_scheduled_results(max_age_sec: int = 180, scan_limit: int = 300) -> int:
+    """Fail scheduled task-results that are no longer present in queue state.
+
+    This guards against rare races (e.g. duplicate supervisors) where a task can
+    remain `scheduled` indefinitely despite being absent from both PENDING/RUNNING.
+    """
+    from ouroboros.task_results import STATUS_FAILED, write_task_result
+
+    now = time.time()
+    fixed = 0
+    with _queue_lock:
+        pending_ids = {str(t.get("id") or "") for t in PENDING if isinstance(t, dict)}
+        running_ids = {str(tid or "") for tid in RUNNING.keys()}
+        active_ids = pending_ids.union(running_ids)
+
+    results_dir = DRIVE_ROOT / "task_results"
+    if not results_dir.exists():
+        return 0
+
+    files = sorted(
+        glob(str(results_dir / "*.json")),
+        key=lambda p: pathlib.Path(p).stat().st_mtime if pathlib.Path(p).exists() else 0.0,
+        reverse=True,
+    )[: max(1, int(scan_limit))]
+
+    for fp in files:
+        path = pathlib.Path(fp)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("status") or "").strip().lower() != "scheduled":
+            continue
+        task_id = str(payload.get("task_id") or path.stem)
+        if not task_id or task_id in active_ids:
+            continue
+        ts = parse_iso_to_ts(str(payload.get("ts") or "")) or path.stat().st_mtime
+        age_sec = max(0.0, now - float(ts))
+        if age_sec < float(max_age_sec):
+            continue
+
+        reason = (
+            "Task marked failed as orphaned: status=scheduled but task is missing "
+            "from pending/running queues."
+        )
+        try:
+            write_task_result(
+                DRIVE_ROOT,
+                task_id,
+                STATUS_FAILED,
+                parent_task_id=payload.get("parent_task_id"),
+                description=payload.get("description"),
+                context=payload.get("context"),
+                executor=payload.get("executor"),
+                repo_scope=payload.get("repo_scope") or [],
+                constraints=payload.get("constraints") or {},
+                artifact_policy=payload.get("artifact_policy"),
+                quota_class=payload.get("quota_class"),
+                priority=payload.get("priority"),
+                task_type=payload.get("task_type") or payload.get("type"),
+                task_kind=payload.get("task_kind"),
+                caller_class=payload.get("caller_class"),
+                model_policy=payload.get("model_policy"),
+                model_override=payload.get("model_override"),
+                importance=payload.get("importance"),
+                defer_on_quota=bool(payload.get("defer_on_quota", True)),
+                budget_decision=payload.get("budget_decision"),
+                result=reason,
+                trace_summary="orphaned_scheduled_task_detected",
+                cost_usd=float(payload.get("cost_usd") or 0.0),
+                total_rounds=int(payload.get("total_rounds") or 0),
+            )
+            append_jsonl(
+                DRIVE_ROOT / "logs" / "supervisor.jsonl",
+                {
+                    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "type": "orphaned_scheduled_task_failed",
+                    "task_id": task_id,
+                    "age_sec": round(age_sec, 1),
+                },
+            )
+            fixed += 1
+        except Exception:
+            log.warning("Failed to reconcile orphaned scheduled task %s", task_id, exc_info=True)
+    return fixed
 
 
 def queue_has_task_type(task_type: str) -> bool:

@@ -172,6 +172,7 @@ def _run_supervisor(settings: dict) -> None:
             enqueue_task, enforce_task_timeouts, enqueue_evolution_task_if_needed,
             persist_queue_snapshot, restore_pending_from_snapshot,
             cancel_task_by_id, queue_review_task, sort_pending,
+            reconcile_orphaned_scheduled_results,
         )
         from supervisor.workers import (
             init as workers_init, get_event_q, WORKERS, PENDING, RUNNING,
@@ -271,6 +272,7 @@ def _run_supervisor(settings: dict) -> None:
             enforce_task_timeouts()
             enqueue_evolution_task_if_needed()
             assign_tasks()
+            reconcile_orphaned_scheduled_results()
             persist_queue_snapshot(reason="main_loop")
 
             # Process messages from WebSocket bridge
