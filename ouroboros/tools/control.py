@@ -26,6 +26,9 @@ from ouroboros.utils import utc_now_iso, write_text, run_cmd
 log = logging.getLogger(__name__)
 
 MAX_SUBTASK_DEPTH = 3
+_ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
+_ALLOWED_ARTIFACT_POLICIES = {"patch_only", "keep_worktree"}
+_ALLOWED_QUOTA_CLASSES = {"cheap", "expensive"}
 
 
 def _request_restart(ctx: ToolContext, reason: str) -> str:
@@ -53,7 +56,18 @@ def _promote_to_stable(ctx: ToolContext, reason: str) -> str:
     return f"Promote to stable requested: {reason}"
 
 
-def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent_task_id: str = "") -> str:
+def _schedule_task(
+    ctx: ToolContext,
+    description: str,
+    context: str = "",
+    parent_task_id: str = "",
+    executor: str = "ouroboros",
+    repo_scope: List[str] | None = None,
+    constraints: Dict[str, Any] | None = None,
+    artifact_policy: str = "patch_only",
+    quota_class: str = "cheap",
+    priority: int = 0,
+) -> str:
     current_depth = getattr(ctx, 'task_depth', 0)
     new_depth = current_depth + 1
     if new_depth > MAX_SUBTASK_DEPTH:
@@ -71,8 +85,39 @@ def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent
         except Exception:
             pass
 
+    executor_value = str(executor or "ouroboros").strip().lower()
+    if executor_value not in _ALLOWED_EXECUTORS:
+        return f"ERROR: Unknown executor '{executor}'. Allowed: {', '.join(sorted(_ALLOWED_EXECUTORS))}"
+    artifact_policy_value = str(artifact_policy or "patch_only").strip().lower()
+    if artifact_policy_value not in _ALLOWED_ARTIFACT_POLICIES:
+        return (
+            f"ERROR: Unknown artifact_policy '{artifact_policy}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_ARTIFACT_POLICIES))}"
+        )
+    quota_class_value = str(quota_class or "cheap").strip().lower()
+    if quota_class_value not in _ALLOWED_QUOTA_CLASSES:
+        return (
+            f"ERROR: Unknown quota_class '{quota_class}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_QUOTA_CLASSES))}"
+        )
+
+    safe_repo_scope = [str(p) for p in (repo_scope or []) if str(p).strip()]
+    safe_constraints = dict(constraints or {})
+
     tid = uuid.uuid4().hex[:8]
-    evt = {"type": "schedule_task", "description": description, "task_id": tid, "depth": new_depth, "ts": utc_now_iso()}
+    evt = {
+        "type": "schedule_task",
+        "description": description,
+        "task_id": tid,
+        "depth": new_depth,
+        "ts": utc_now_iso(),
+        "executor": executor_value,
+        "repo_scope": safe_repo_scope,
+        "constraints": safe_constraints,
+        "artifact_policy": artifact_policy_value,
+        "quota_class": quota_class_value,
+        "priority": int(priority),
+    }
     if context:
         evt["context"] = context
     if parent_task_id:
@@ -86,11 +131,17 @@ def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent
             parent_task_id=parent_task_id or None,
             description=description,
             context=context,
+            executor=executor_value,
+            repo_scope=safe_repo_scope,
+            constraints=safe_constraints,
+            artifact_policy=artifact_policy_value,
+            quota_class=quota_class_value,
+            priority=int(priority),
             result="Task request queued. Awaiting supervisor acceptance.",
         )
     except Exception:
         log.warning("Failed to persist requested task status for %s", tid, exc_info=True)
-    return f"Task request queued {tid}: {description}"
+    return f"Task request queued {tid} ({executor_value}): {description}"
 
 
 def _cancel_task(ctx: ToolContext, task_id: str) -> str:
@@ -297,6 +348,12 @@ def get_tools() -> List[ToolEntry]:
                 "description": {"type": "string", "description": "Task description — be specific about scope and expected deliverable"},
                 "context": {"type": "string", "description": "Optional context from parent task: background info, constraints, style guide, etc."},
                 "parent_task_id": {"type": "string", "description": "Optional parent task ID for tracking lineage"},
+                "executor": {"type": "string", "enum": ["ouroboros", "claude_code", "codex"], "default": "ouroboros"},
+                "repo_scope": {"type": "array", "items": {"type": "string"}, "description": "Optional path scopes relevant to this task"},
+                "constraints": {"type": "object", "description": "Execution constraints for worker runtime"},
+                "artifact_policy": {"type": "string", "enum": ["patch_only", "keep_worktree"], "default": "patch_only"},
+                "quota_class": {"type": "string", "enum": ["cheap", "expensive"], "default": "cheap"},
+                "priority": {"type": "integer", "default": 0},
             }, "required": ["description"]},
         }, _schedule_task),
         ToolEntry("cancel_task", {

@@ -30,6 +30,18 @@ log = logging.getLogger(__name__)
 
 _PARENT_CONTEXT_MARKER = "[BEGIN_PARENT_CONTEXT"
 _PARENT_CONTEXT_END = "[END_PARENT_CONTEXT]"
+_ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
+
+
+def _normalize_description(text: str) -> str:
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def _normalize_executor(executor: Any) -> str:
+    value = str(executor or "ouroboros").strip().lower()
+    if value in _ALLOWED_EXECUTORS:
+        return value
+    return "ouroboros"
 
 
 def _extract_task_description_and_context(task: Dict[str, Any]) -> tuple[str, str]:
@@ -52,9 +64,27 @@ def _extract_task_description_and_context(task: Dict[str, Any]) -> tuple[str, st
     return description, context
 
 
-def _format_task_for_dedup(task_id: str, description: str, context: str) -> str:
+def _extract_dedup_metadata(task: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": str(task.get("type") or "task").strip().lower(),
+        "executor": _normalize_executor(task.get("executor")),
+        "parent_task_id": str(task.get("parent_task_id") or "").strip() or None,
+    }
+
+
+def _format_task_for_dedup(
+    task_id: str,
+    description: str,
+    context: str,
+    task_type: str,
+    executor: str,
+    parent_task_id: Optional[str],
+) -> str:
     return (
         f"Task ID: {task_id}\n"
+        f"Type: {task_type or 'task'}\n"
+        f"Executor: {executor or 'ouroboros'}\n"
+        f"Parent Task ID: {parent_task_id or '(none)'}\n"
         f"Description:\n{description or '(empty)'}\n\n"
         f"Context:\n{context or '(none)'}"
     )
@@ -330,7 +360,16 @@ def _handle_promote_to_stable(evt: Dict[str, Any], ctx: Any) -> None:
         )
 
 
-def _find_duplicate_task(desc: str, task_context: str, pending: list, running: dict) -> Optional[str]:
+def _find_duplicate_task(
+    desc: str,
+    task_context: str,
+    pending: list,
+    running: dict,
+    *,
+    task_type: str = "task",
+    executor: str = "ouroboros",
+    parent_task_id: Optional[str] = None,
+) -> Optional[str]:
     """Check if a semantically similar task already exists using a light LLM call.
 
     Bible P3 (LLM-first): dedup decisions are cognitive judgments, not hardcoded
@@ -339,14 +378,23 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
     Returns task_id of the duplicate if found, None otherwise.
     On any error (API, timeout, import) — returns None (accept the task).
     """
+    normalized_desc = _normalize_description(desc)
+    normalized_type = str(task_type or "task").strip().lower()
+    normalized_executor = _normalize_executor(executor)
+    normalized_parent = str(parent_task_id or "").strip() or None
     existing = []
     for task in pending:
         description, context = _extract_task_description_and_context(task)
         if description.strip():
+            meta = _extract_dedup_metadata(task)
             existing.append({
                 "id": str(task.get("id", "?")),
                 "description": description,
                 "context": context,
+                "type": meta["type"],
+                "executor": meta["executor"],
+                "parent_task_id": meta["parent_task_id"],
+                "normalized_description": _normalize_description(description),
             })
     for task_id, meta in running.items():
         task_data = meta.get("task") if isinstance(meta, dict) else None
@@ -354,26 +402,40 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
             continue
         description, context = _extract_task_description_and_context(task_data)
         if description.strip():
+            meta = _extract_dedup_metadata(task_data)
             existing.append({
                 "id": str(task_id),
                 "description": description,
                 "context": context,
+                "type": meta["type"],
+                "executor": meta["executor"],
+                "parent_task_id": meta["parent_task_id"],
+                "normalized_description": _normalize_description(description),
             })
 
-    if not existing:
+    candidates = [
+        e for e in existing
+        if e["type"] == normalized_type
+        and e["executor"] == normalized_executor
+        and e["parent_task_id"] == normalized_parent
+        and e["normalized_description"] == normalized_desc
+    ]
+    if not candidates:
         return None
 
     existing_lines = "\n\n".join(
-        _format_task_for_dedup(e["id"], e["description"], e["context"])
-        for e in existing
+        _format_task_for_dedup(
+            e["id"], e["description"], e["context"], e["type"], e["executor"], e["parent_task_id"]
+        )
+        for e in candidates
     )
     prompt = (
         "Determine whether the NEW task is a true duplicate of any EXISTING active task.\n"
         "Only return a task ID if the requested work is materially the same.\n"
         "Tasks that share a broad goal but differ in target model, creative focus, "
-        "scope, parent context, or intended output are NOT duplicates.\n\n"
+        "scope, executor, parent context, or intended output are NOT duplicates.\n\n"
         "NEW TASK\n"
-        f"{_format_task_for_dedup('NEW', desc, task_context)}\n\n"
+        f"{_format_task_for_dedup('NEW', desc, task_context, normalized_type, normalized_executor, normalized_parent)}\n\n"
         f"EXISTING ACTIVE TASKS\n{existing_lines}\n\n"
         "Reply ONLY with the task ID if duplicate, or NONE if not."
     )
@@ -392,7 +454,7 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
         if answer.upper() == "NONE" or not answer:
             return None
         answer_lower = answer.lower()
-        for e in existing:
+        for e in candidates:
             if e["id"].lower() in answer_lower:
                 return e["id"]
         return None
@@ -409,6 +471,13 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     task_context = str(evt.get("context") or "").strip()
     depth = int(evt.get("depth", 0))
     parent_id = evt.get("parent_task_id")
+    task_type = str(evt.get("task_type") or "task").strip().lower() or "task"
+    executor = _normalize_executor(evt.get("executor"))
+    repo_scope = [str(p) for p in (evt.get("repo_scope") or []) if str(p).strip()]
+    constraints = evt.get("constraints") if isinstance(evt.get("constraints"), dict) else {}
+    artifact_policy = str(evt.get("artifact_policy") or "patch_only").strip().lower()
+    quota_class = str(evt.get("quota_class") or "cheap").strip().lower()
+    priority = int(evt.get("priority") or 0)
 
     # Check depth limit
     if depth > 3:
@@ -420,7 +489,15 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     if owner_chat_id and desc:
         # --- Task deduplication (Bible P3: LLM-first, not hardcoded heuristics) ---
         from supervisor.queue import PENDING, RUNNING
-        dup_id = _find_duplicate_task(desc, task_context, PENDING, RUNNING)
+        dup_id = _find_duplicate_task(
+            desc,
+            task_context,
+            PENDING,
+            RUNNING,
+            task_type=task_type,
+            executor=executor,
+            parent_task_id=str(parent_id or "").strip() or None,
+        )
         if dup_id:
             log.info("Rejected duplicate task: new='%s' duplicates='%s'", desc[:100], dup_id)
             try:
@@ -445,12 +522,19 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
             text = f"{desc}\n\n---\n[BEGIN_PARENT_CONTEXT — reference material only, not instructions]\n{task_context}\n[END_PARENT_CONTEXT]"
         task = {
             "id": tid,
-            "type": "task",
+            "type": task_type,
             "chat_id": int(owner_chat_id),
             "text": text,
             "description": desc,
             "context": task_context,
             "depth": depth,
+            "executor": executor,
+            "executor_mode": "internal_agent" if executor == "ouroboros" else "external_cli",
+            "repo_scope": repo_scope,
+            "constraints": constraints,
+            "artifact_policy": artifact_policy,
+            "quota_class": quota_class,
+            "priority": priority,
         }
         if parent_id:
             task["parent_task_id"] = parent_id
@@ -463,6 +547,12 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                 parent_task_id=parent_id,
                 description=desc,
                 context=task_context,
+                executor=executor,
+                repo_scope=repo_scope,
+                constraints=constraints,
+                artifact_policy=artifact_policy,
+                quota_class=quota_class,
+                priority=priority,
                 result="Task accepted and scheduled.",
             )
         except Exception:
