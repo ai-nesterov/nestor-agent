@@ -293,12 +293,16 @@ def _release_settings_lock(fd: Optional[int]) -> None:
 def load_settings() -> dict:
     fd = _acquire_settings_lock()
     try:
+        merged_defaults = dict(SETTINGS_DEFAULTS)
         if SETTINGS_PATH.exists():
             try:
-                return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+                loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    merged_defaults.update(loaded)
+                    return merged_defaults
             except Exception:
                 pass
-        return dict(SETTINGS_DEFAULTS)
+        return merged_defaults
     finally:
         _release_settings_lock(fd)
 
