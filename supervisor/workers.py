@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from supervisor.state import load_state, append_jsonl
 from supervisor import git_ops
 from supervisor.message_bus import send_with_budget
+from ouroboros.task_results import STATUS_COMPLETED, STATUS_FAILED, write_task_result
+from ouroboros.utils import utc_now_iso
 
 
 # ---------------------------------------------------------------------------
@@ -308,16 +310,220 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
     except Exception as _e:
         _log_worker_crash(wid, _drive, "make_agent", _e, _tb.format_exc())
         return
+
+    def _run_external_task(task: Dict[str, Any], executor: str) -> None:
+        started_at = time.time()
+        started_iso = utc_now_iso()
+        task_id = str(task.get("id") or "")
+        summary = ""
+        result_text = ""
+        status = STATUS_FAILED
+        artifact_dir = ""
+        changed_files: List[str] = []
+        diff_stat: Dict[str, Any] = {"files": 0, "insertions": 0, "deletions": 0}
+        tests_run: List[str] = []
+        tests_passed: Optional[bool] = None
+        cost_usd = 0.0
+        total_rounds = 1
+
+        out_q.put({
+            "type": "log_event",
+            "data": {
+                "type": "executor_run",
+                "ts": started_iso,
+                "task_id": task_id,
+                "executor": executor,
+                "status": "running",
+                "summary": "external executor task started",
+            },
+        })
+
+        manager = None
+        handle = None
+        try:
+            from ouroboros.executors.artifacts import ArtifactManager
+            from ouroboros.executors.claude_code import ClaudeCodeRunner
+            from ouroboros.executors.codex import CodexRunner
+            from ouroboros.executors.worktree import WorktreeManager
+
+            repo_path = _pathlib.Path(repo_dir)
+            drive_path = _pathlib.Path(drive_root)
+            worktrees_subdir = str(os.environ.get("EXECUTOR_WORKTREES_SUBDIR") or "worktrees")
+            worktrees_root = drive_path / worktrees_subdir
+
+            manager = WorktreeManager(repo_path, branch_dev=BRANCH_DEV, worktrees_root=worktrees_root)
+            handle = manager.prepare_worktree(task_id=task_id, base_branch=BRANCH_DEV, executor=executor)
+
+            artifacts = ArtifactManager(drive_path)
+            artifact_path = artifacts.prepare_artifact_dir(task_id)
+            artifact_dir = str(artifact_path)
+            artifacts.write_text(
+                artifact_path,
+                "prompt.txt",
+                str(task.get("description") or task.get("text") or ""),
+            )
+
+            if executor == "codex":
+                runner = CodexRunner(
+                    model=str(os.environ.get("CODEX_MODEL") or "gpt-5.4"),
+                    auth_mode=str(os.environ.get("CODEX_AUTH_MODE") or "subscription_only"),
+                    timeout_sec=int(os.environ.get("CODEX_EXECUTOR_TIMEOUT_SEC", os.environ.get("OUROBOROS_HARD_TIMEOUT_SEC", "1800"))),
+                )
+            else:
+                runner = ClaudeCodeRunner(
+                    model=str(os.environ.get("CLAUDE_CODE_MODEL") or "sonnet"),
+                    auth_mode=str(os.environ.get("CLAUDE_CODE_AUTH_MODE") or "subscription_only"),
+                    timeout_sec=int(os.environ.get("CLAUDE_EXECUTOR_TIMEOUT_SEC", os.environ.get("OUROBOROS_HARD_TIMEOUT_SEC", "1800"))),
+                )
+
+            ext_result = runner.run(task, worktree=handle, artifact_dir=artifact_path)
+            manager.collect_patch(handle, artifact_path)
+
+            usage = ext_result.usage if isinstance(ext_result.usage, dict) else {}
+            try:
+                cost_usd = float(usage.get("cost_usd") or 0.0)
+            except Exception:
+                cost_usd = 0.0
+
+            payload: Dict[str, Any] = {}
+            if ext_result.result_text:
+                try:
+                    candidate = json.loads(ext_result.result_text)
+                    if isinstance(candidate, dict):
+                        payload = candidate
+                except Exception:
+                    payload = {}
+            if isinstance(payload.get("tests_run"), list):
+                tests_run = [str(x) for x in payload.get("tests_run") or []]
+            if isinstance(payload.get("tests_passed"), bool):
+                tests_passed = bool(payload.get("tests_passed"))
+
+            changed_files = list(ext_result.changed_files or [])
+            diff_stat = dict(ext_result.diff_stat or {"files": 0, "insertions": 0, "deletions": 0})
+            result_text = str(ext_result.result_text or "")
+            summary = str(ext_result.summary or "")
+            status = STATUS_COMPLETED if ext_result.status == "completed" else STATUS_FAILED
+
+            artifacts.write_result(artifact_path, ext_result.to_dict())
+            artifacts.write_manifest(
+                artifact_path,
+                {
+                    "task_id": task_id,
+                    "executor": executor,
+                    "status": ext_result.status,
+                    "summary": ext_result.summary,
+                    "base_sha": ext_result.base_sha,
+                    "worktree_path": ext_result.worktree_path,
+                    "timings": ext_result.timings,
+                    "auth_mode": usage.get("auth_mode"),
+                    "model": usage.get("model"),
+                },
+            )
+        except Exception as exc:
+            summary = f"External executor crashed: {type(exc).__name__}: {exc}"
+            result_text = summary
+            status = STATUS_FAILED
+        finally:
+            retain = str(task.get("artifact_policy") or "patch_only").strip().lower() == "keep_worktree"
+            try:
+                if manager is not None and handle is not None:
+                    manager.cleanup_worktree(handle, retain=retain)
+            except Exception:
+                pass
+
+        finished_iso = utc_now_iso()
+        duration_sec = round(max(0.0, time.time() - started_at), 3)
+        write_task_result(
+            drive_root,
+            task_id,
+            status,
+            parent_task_id=task.get("parent_task_id"),
+            description=task.get("description"),
+            context=task.get("context"),
+            executor=executor,
+            repo_scope=task.get("repo_scope") or [],
+            constraints=task.get("constraints") or {},
+            artifact_policy=task.get("artifact_policy"),
+            quota_class=task.get("quota_class"),
+            priority=task.get("priority"),
+            task_type=task.get("type"),
+            task_kind=task.get("task_kind"),
+            caller_class=task.get("caller_class"),
+            model_policy=task.get("model_policy"),
+            model_override=task.get("model_override"),
+            importance=task.get("importance"),
+            defer_on_quota=bool(task.get("defer_on_quota", True)),
+            budget_decision=task.get("budget_decision"),
+            result=result_text,
+            trace_summary=f"external_executor={executor}; summary={summary}",
+            cost_usd=round(float(cost_usd or 0.0), 6),
+            total_rounds=total_rounds,
+            artifact_dir=artifact_dir or None,
+            changed_files=changed_files,
+            diff_stat=diff_stat,
+            tests_run=tests_run,
+            tests_passed=tests_passed,
+            timings={"started_at": started_iso, "finished_at": finished_iso, "duration_sec": duration_sec},
+            ts=finished_iso,
+        )
+        out_q.put(
+            {
+                "type": "task_metrics",
+                "task_id": task_id,
+                "task_type": task.get("type"),
+                "duration_sec": duration_sec,
+                "tool_calls": 0,
+                "tool_errors": 0,
+                "cost_usd": round(float(cost_usd or 0.0), 6),
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_rounds": total_rounds,
+                "ts": finished_iso,
+            }
+        )
+        out_q.put(
+            {
+                "type": "task_done",
+                "task_id": task_id,
+                "task_type": task.get("type"),
+                "cost_usd": round(float(cost_usd or 0.0), 6),
+                "total_rounds": total_rounds,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "duration_sec": duration_sec,
+                "ts": finished_iso,
+            }
+        )
+        out_q.put(
+            {
+                "type": "log_event",
+                "data": {
+                    "type": "executor_result",
+                    "ts": finished_iso,
+                    "task_id": task_id,
+                    "executor": executor,
+                    "status": "completed" if status == STATUS_COMPLETED else "failed",
+                    "summary": summary,
+                    "duration_sec": duration_sec,
+                    "changed_files_count": len(changed_files),
+                },
+            }
+        )
+
     while True:
         try:
             task = in_q.get()
             if task is None or task.get("type") == "shutdown":
                 break
-            events = agent.handle_task(task)
-            for e in events:
-                e2 = dict(e)
-                e2["worker_id"] = wid
-                out_q.put(e2)
+            executor = str(task.get("executor") or "ouroboros").strip().lower() or "ouroboros"
+            if executor in {"codex", "claude_code"}:
+                _run_external_task(task, executor)
+            else:
+                events = agent.handle_task(task)
+                for e in events:
+                    e2 = dict(e)
+                    e2["worker_id"] = wid
+                    out_q.put(e2)
         except Exception as _e:
             _log_worker_crash(wid, _drive, "handle_task", _e, _tb.format_exc())
 
@@ -459,7 +665,21 @@ def spawn_workers(n: int = 0) -> None:
     except Exception:
         events_offset = 0
 
-    count = n or MAX_WORKERS
+    default_main = int(n or MAX_WORKERS or 1)
+    main_count = max(0, int(os.environ.get("MAIN_WORKERS", str(default_main))))
+    ext_enabled = str(os.environ.get("EXTERNAL_EXECUTORS_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
+    codex_count = 0
+    claude_count = 0
+    if ext_enabled:
+        if str(os.environ.get("CODEX_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}:
+            codex_count = max(0, int(os.environ.get("CODEX_WORKERS", "0")))
+        if str(os.environ.get("CLAUDE_CODE_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}:
+            claude_count = max(0, int(os.environ.get("CLAUDE_CODE_WORKERS", "0")))
+    worker_specs: List[Tuple[str, int]] = [("ouroboros", main_count), ("codex", codex_count), ("claude_code", claude_count)]
+    count = sum(cnt for _, cnt in worker_specs)
+    if count <= 0:
+        worker_specs = [("ouroboros", 1)]
+        count = 1
     append_jsonl(
         DRIVE_ROOT / "logs" / "supervisor.jsonl",
         {
@@ -467,16 +687,20 @@ def spawn_workers(n: int = 0) -> None:
             "type": "worker_spawn_start",
             "start_method": _WORKER_START_METHOD,
             "count": count,
+            "worker_specs": [{"kind": kind, "count": cnt} for kind, cnt in worker_specs],
         },
     )
     WORKERS.clear()
-    for i in range(count):
-        in_q = _CTX.Queue()
-        proc = _CTX.Process(target=worker_main,
-                           args=(i, in_q, _EVENT_Q, str(REPO_DIR), str(DRIVE_ROOT)))
-        proc.daemon = True
-        proc.start()
-        WORKERS[i] = Worker(wid=i, proc=proc, in_q=in_q, busy_task_id=None)
+    i = 0
+    for kind, cnt in worker_specs:
+        for _ in range(cnt):
+            in_q = _CTX.Queue()
+            proc = _CTX.Process(target=worker_main,
+                               args=(i, in_q, _EVENT_Q, str(REPO_DIR), str(DRIVE_ROOT)))
+            proc.daemon = True
+            proc.start()
+            WORKERS[i] = Worker(wid=i, proc=proc, in_q=in_q, busy_task_id=None, kind=kind)
+            i += 1
     global _LAST_SPAWN_TIME
     _LAST_SPAWN_TIME = time.time()
     # Run SHA verification in background to avoid blocking the main loop for up to 90s
@@ -552,7 +776,7 @@ def _kill_survivors() -> None:
         w.proc.join(timeout=2)
 
 
-def respawn_worker(wid: int) -> None:
+def respawn_worker(wid: int, kind: str = "ouroboros") -> None:
     global _LAST_SPAWN_TIME
     ctx = _get_ctx()
     in_q = ctx.Queue()
@@ -560,7 +784,7 @@ def respawn_worker(wid: int) -> None:
                        args=(wid, in_q, get_event_q(), str(REPO_DIR), str(DRIVE_ROOT)))
     proc.daemon = True
     proc.start()
-    WORKERS[wid] = Worker(wid=wid, proc=proc, in_q=in_q, busy_task_id=None, kind="ouroboros")
+    WORKERS[wid] = Worker(wid=wid, proc=proc, in_q=in_q, busy_task_id=None, kind=kind)
     # Give freshly respawned workers the same init grace as startup workers.
     _LAST_SPAWN_TIME = time.time()
 
@@ -732,7 +956,7 @@ def ensure_workers_healthy() -> None:
                     except Exception:
                         log.debug("Failed to write interrupted status for %s", w.busy_task_id, exc_info=True)
                     queue.enqueue_task(task, front=True)
-            respawn_worker(wid)
+            respawn_worker(wid, getattr(w, "kind", "ouroboros"))
             queue.persist_queue_snapshot(reason="worker_respawn_after_crash")
 
     now = time.time()
@@ -772,4 +996,3 @@ def ensure_workers_healthy() -> None:
         # Kill all workers — direct chat via handle_chat_direct still works
         kill_workers()
         CRASH_TS.clear()
-
