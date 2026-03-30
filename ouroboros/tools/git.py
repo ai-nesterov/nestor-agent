@@ -55,6 +55,78 @@ def _auto_tag_on_version_bump(repo_dir: pathlib.Path, commit_message: str) -> st
         return ""
 
 
+def create_git_tag(tag_name: str, message: str, commit_sha: Optional[str] = None) -> str:
+    """
+    Create an annotated git tag.
+    
+    Args:
+        tag_name: Tag name (e.g., "v4.7.0")
+        message: Tag message/description
+        commit_sha: Optional commit SHA to tag (defaults to HEAD)
+    
+    Returns:
+        Success message or error description
+    """
+    from ouroboros.config import REPO_DIR
+    
+    if not tag_name:
+        return "Error: tag_name is required"
+    
+    try:
+        cmd = ["git", "tag", "-a", tag_name, "-m", message]
+        if commit_sha:
+            cmd.append(commit_sha)
+        run_cmd(cmd, cwd=REPO_DIR)
+        return f"Created tag {tag_name}"
+    except Exception as e:
+        if "already exists" in str(e):
+            return f"Tag {tag_name} already exists"
+        return f"Failed to create tag: {e}"
+
+
+def delete_git_tag(tag_name: str) -> str:
+    """
+    Delete a git tag.
+    
+    Args:
+        tag_name: Tag name to delete (e.g., "v4.7.0")
+    
+    Returns:
+        Success message or error description
+    """
+    from ouroboros.config import REPO_DIR
+    
+    if not tag_name:
+        return "Error: tag_name is required"
+    
+    try:
+        run_cmd(["git", "tag", "-d", tag_name], cwd=REPO_DIR)
+        return f"Deleted tag {tag_name}"
+    except Exception as e:
+        if "not found" in str(e):
+            return f"Tag {tag_name} not found"
+        return f"Failed to delete tag: {e}"
+
+
+def list_git_tags() -> str:
+    """
+    List all git tags.
+    
+    Returns:
+        Formatted list of tags
+    """
+    from ouroboros.config import REPO_DIR
+    
+    try:
+        result = run_cmd(["git", "tag", "-l"], cwd=REPO_DIR)
+        tags = result.strip().splitlines()
+        if not tags:
+            return "No tags found"
+        return "\n".join(f"  {tag}" for tag in tags)
+    except Exception as e:
+        return f"Failed to list tags: {e}"
+
+
 def _auto_push(repo_dir: pathlib.Path) -> str:
     try:
         from supervisor.git_ops import push_to_remote
@@ -860,4 +932,25 @@ def get_tools() -> List[ToolEntry]:
                 "confirm": {"type": "boolean", "description": "Must be true to execute."},
             }, "required": ["sha", "confirm"]},
         }, _revert_commit, is_code_tool=True),
+        ToolEntry("create_git_tag", {
+            "name": "create_git_tag",
+            "description": "Create an annotated git tag. Use for version releases.",
+            "parameters": {"type": "object", "properties": {
+                "tag_name": {"type": "string", "description": "Tag name (e.g., 'v4.7.0')"},
+                "message": {"type": "string", "description": "Tag message/description"},
+                "commit_sha": {"type": "string", "description": "Optional commit SHA to tag (defaults to HEAD)"},
+            }, "required": ["tag_name", "message"]},
+        }, create_git_tag, is_code_tool=True),
+        ToolEntry("delete_git_tag", {
+            "name": "delete_git_tag",
+            "description": "Delete a git tag. Use carefully for fixing duplicate/misplaced tags.",
+            "parameters": {"type": "object", "properties": {
+                "tag_name": {"type": "string", "description": "Tag name to delete (e.g., 'v4.7.0')"},
+            }, "required": ["tag_name"]},
+        }, delete_git_tag, is_code_tool=True),
+        ToolEntry("list_git_tags", {
+            "name": "list_git_tags",
+            "description": "List all git tags in the repository.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }, list_git_tags, is_code_tool=True),
     ]
