@@ -80,22 +80,19 @@ export function initCosts({ ws, state }) {
         const tbody = document.querySelector('#executor-limits-table tbody');
         tbody.innerHTML = '';
 
-        const f5h = provider.five_hour_remaining == null ? 'N/A' : String(provider.five_hour_remaining);
-        const fWeek = provider.weekly_remaining == null ? 'N/A' : String(provider.weekly_remaining);
-
         const rows = [
             {
                 provider: 'Codex',
                 auth: `${Boolean(codex.logged_in)} | ${codex.auth_method || 'unknown'}`,
-                fiveHour: f5h,
-                weekly: fWeek,
+                fiveHour: codex.five_hour_remaining == null ? 'N/A' : String(codex.five_hour_remaining),
+                weekly: codex.weekly_remaining == null ? 'N/A' : String(codex.weekly_remaining),
                 daily: `${codex.daily_remaining || 0} (${codex.daily_used || 0}/${codex.daily_cap || 0})`,
             },
             {
                 provider: 'Claude',
                 auth: `${Boolean(claude.logged_in)} | ${claude.auth_method || 'unknown'} | ${claude.subscription_type || 'unknown'}`,
-                fiveHour: f5h,
-                weekly: fWeek,
+                fiveHour: claude.five_hour_remaining == null ? 'N/A' : String(claude.five_hour_remaining),
+                weekly: claude.weekly_remaining == null ? 'N/A' : String(claude.weekly_remaining),
                 daily: `${claude.daily_remaining || 0} (${claude.daily_used || 0}/${claude.daily_cap || 0})`,
             },
         ];

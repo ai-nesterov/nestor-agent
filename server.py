@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -612,6 +613,63 @@ async def api_executor_status(request: Request) -> JSONResponse:
         except Exception as exc:
             return False, str(exc)
 
+    def _probe_claude_usage_limits() -> dict:
+        ok, raw = _run_status(["claude", "-p", "/usage", "--output-format", "text"], timeout_sec=10.0)
+        text = (raw or "").strip()
+        lowered = text.lower()
+        if not ok:
+            return {
+                "five_hour_remaining": None,
+                "weekly_remaining": None,
+                "source": "probe_failed",
+                "note": f"Claude /usage probe failed: {text[:140] or 'no output'}",
+            }
+        if "unknown skill: usage" in lowered:
+            return {
+                "five_hour_remaining": None,
+                "weekly_remaining": None,
+                "source": "slash_unavailable_noninteractive",
+                "note": "Claude CLI /usage is unavailable in non-interactive print mode.",
+            }
+        if not text:
+            return {
+                "five_hour_remaining": None,
+                "weekly_remaining": None,
+                "source": "empty_probe_output",
+                "note": "Claude /usage returned empty output in non-interactive mode.",
+            }
+
+        five_hour_remaining = None
+        weekly_remaining = None
+        five_match = re.search(
+            r"(?:5\s*[- ]?hour|5h)[^\n]{0,80}?remaining[^\n:]*[:=]\s*([^\n]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        week_match = re.search(
+            r"(?:weekly|week)[^\n]{0,80}?remaining[^\n:]*[:=]\s*([^\n]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if five_match:
+            five_hour_remaining = five_match.group(1).strip()
+        if week_match:
+            weekly_remaining = week_match.group(1).strip()
+
+        if five_hour_remaining is None and weekly_remaining is None:
+            return {
+                "five_hour_remaining": None,
+                "weekly_remaining": None,
+                "source": "unparseable_probe_output",
+                "note": "Claude /usage responded, but no parseable 5h/week remaining values were found.",
+            }
+        return {
+            "five_hour_remaining": five_hour_remaining,
+            "weekly_remaining": weekly_remaining,
+            "source": "claude_usage_probe",
+            "note": "",
+        }
+
     try:
         from supervisor.state import load_state
         st = load_state()
@@ -640,6 +698,15 @@ async def api_executor_status(request: Request) -> JSONResponse:
         claude_cap = int(settings.get("CLAUDE_CODE_DAILY_TASK_CAP", 5) or 5)
         codex_used = int(st.get("codex_runs_today") or 0)
         claude_used = int(st.get("claude_code_runs_today") or 0)
+        claude_usage_limits = _probe_claude_usage_limits()
+        codex_limits = {
+            "five_hour_remaining": None,
+            "weekly_remaining": None,
+            "source": "not_exposed_by_cli",
+            "note": "Codex CLI does not expose subscription 5h/week remaining quotas via a stable non-interactive command.",
+        }
+        note_parts = [str(codex_limits.get("note") or "").strip(), str(claude_usage_limits.get("note") or "").strip()]
+        global_note = " ".join([p for p in note_parts if p]).strip()
 
         return JSONResponse(
             {
@@ -653,6 +720,9 @@ async def api_executor_status(request: Request) -> JSONResponse:
                     "daily_cap": codex_cap,
                     "daily_used": codex_used,
                     "daily_remaining": max(0, codex_cap - codex_used),
+                    "five_hour_remaining": codex_limits.get("five_hour_remaining"),
+                    "weekly_remaining": codex_limits.get("weekly_remaining"),
+                    "limits_source": codex_limits.get("source"),
                 },
                 "claude": {
                     "status_ok": claude_ok,
@@ -663,12 +733,15 @@ async def api_executor_status(request: Request) -> JSONResponse:
                     "daily_cap": claude_cap,
                     "daily_used": claude_used,
                     "daily_remaining": max(0, claude_cap - claude_used),
+                    "five_hour_remaining": claude_usage_limits.get("five_hour_remaining"),
+                    "weekly_remaining": claude_usage_limits.get("weekly_remaining"),
+                    "limits_source": claude_usage_limits.get("source"),
                 },
                 "provider_window_limits": {
                     "five_hour_remaining": None,
                     "weekly_remaining": None,
-                    "source": "cli_not_exposed",
-                    "note": "Codex/Claude CLI currently do not expose 5h/week remaining quotas in status output.",
+                    "source": "per_provider_probe",
+                    "note": global_note,
                 },
             }
         )
