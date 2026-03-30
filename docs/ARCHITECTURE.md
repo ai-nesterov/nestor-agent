@@ -1,4 +1,4 @@
-# Ouroboros v4.5.0 — Architecture & Reference
+# Ouroboros v4.5.1 — Architecture & Reference
 
 This document describes every component, page, button, API endpoint, and data flow.
 It is the single source of truth for how the system works. Keep it updated.
@@ -299,6 +299,7 @@ Navigation is a left sidebar with 8 pages.
 | GET | `/api/evolution-data` | Evolution metrics per git tag (LOC, prompt sizes, memory) |
 | GET | `/api/chat/history` | Merged chat + system summaries + progress messages (chronological, limit param) |
 | POST | `/api/local-model/test` | Local model sanity test (chat + tool calling) |
+| POST | `/api/telegram/webhook` | Telegram Bot API webhook: receives updates, routes to message_bus as `telegram_message` tasks |
 | WS | `/ws` | WebSocket: chat messages, commands, log streaming |
 | GET | `/static/*` | Static files from `web/` directory (NoCacheStaticFiles wrapper forces revalidation) |
 
@@ -394,6 +395,15 @@ Each iteration (0.5s sleep):
 - **Credential helper**: `git_ops.configure_remote()` stores credentials in repo-local
   `.git/credentials`. `migrate_remote_credentials()` migrates legacy token-in-URL origins.
   Both are wired at startup and on settings save.
+
+### Telegram tools (tools/telegram.py)
+
+- **`telegram_send_message`**: Send a text message to a Telegram chat (4096 char limit)
+- **`telegram_setup_webhook`**: Configure webhook URL with Telegram Bot API
+- **`telegram_get_webhook_info`**: Get current webhook status and statistics
+- **`telegram_get_me`**: Get bot information (username, ID)
+- **Integration flow**: Webhook endpoint (`/api/telegram/webhook`) receives updates → routes to message_bus as `telegram_message` tasks → agent processes → response sent via `telegram_send_message`
+- **Configuration**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_ENABLED`, `TELEGRAM_WEBHOOK_URL` in settings
 
 ### Safety system (safety.py + registry.py)
 

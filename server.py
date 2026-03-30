@@ -280,6 +280,50 @@ def _run_supervisor(settings: dict) -> None:
                 if not msg:
                     continue
 
+                # Handle structured messages (e.g., from Telegram webhook)
+                if isinstance(msg, dict) and msg.get("type") == "telegram_message":
+                    chat_id = msg.get("chat_id")
+                    text = msg.get("text", "")
+                    msg_id = msg.get("msg_id")
+                    now_iso = msg.get("ts", datetime.now(timezone.utc).isoformat())
+                    
+                    if not chat_id or not text:
+                        continue
+                    
+                    user_id = 1  # Telegram users mapped to user_id=1
+                    
+                    st = load_state()
+                    if st.get("owner_id") is None:
+                        st["owner_id"] = user_id
+                        st["owner_chat_id"] = chat_id
+                    
+                    from supervisor.message_bus import log_chat
+                    log_chat("in", chat_id, user_id, text)
+                    st["last_owner_message_at"] = now_iso
+                    save_state(st)
+                    
+                    if not text:
+                        continue
+                    
+                    # Route Telegram message to agent (same as regular chat)
+                    _consciousness.inject_observation(f"Telegram message from {chat_id}: {text}")
+                    agent = _get_chat_agent()
+                    if agent._busy:
+                        agent.inject_message(text)
+                    else:
+                        _consciousness.pause()
+                        def _run_telegram_and_resume(cid, txt, reply_cid):
+                            try:
+                                # Handle as regular chat, but reply goes back to Telegram
+                                handle_chat_direct(cid, txt, None, telegram_chat_id=reply_cid)
+                            finally:
+                                _consciousness.resume()
+                        threading.Thread(
+                            target=_run_telegram_and_resume, args=(chat_id, text, chat_id), daemon=True,
+                        ).start()
+                    continue
+
+                # Regular text message from UI
                 chat_id = 1
                 user_id = 1
                 text = str(msg.get("text") or "")
@@ -838,6 +882,56 @@ from ouroboros.local_model_api import (
     api_local_model_status, api_local_model_test,
 )
 
+
+async def api_telegram_webhook(request: Request) -> JSONResponse:
+    """Telegram webhook endpoint — receives updates from Telegram Bot API."""
+    try:
+        update = await request.json()
+    except Exception:
+        log.warning("Failed to parse Telegram webhook JSON")
+        return JSONResponse({"status": "error", "message": "Invalid JSON"}, status_code=400)
+    
+    # Check if bot is enabled
+    telegram_enabled = os.environ.get("TELEGRAM_BOT_ENABLED", "false").lower() in ("true", "1", "yes")
+    if not telegram_enabled:
+        log.debug("Telegram webhook received but bot is disabled")
+        return JSONResponse({"status": "ok"})
+    
+    # Extract message data
+    message = update.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    text = message.get("text", "")
+    msg_id = message.get("message_id")
+    
+    if not chat_id or not text:
+        log.debug("Telegram update without chat_id or text: %s", update.keys())
+        return JSONResponse({"status": "ok"})
+    
+    log.info("Telegram message from chat %s: %s", chat_id, text[:100])
+    
+    # Route to message bus as a chat message
+    try:
+        from supervisor.message_bus import LocalChatBridge
+        bridge = LocalChatBridge()
+        
+        # Create a task-like message for the agent
+        task_data = {
+            "type": "telegram_message",
+            "chat_id": chat_id,
+            "text": text,
+            "msg_id": msg_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        # Push to message bus
+        bridge.push_message(task_data)
+        
+        return JSONResponse({"status": "ok", "message": "Message queued"})
+    except Exception as e:
+        log.error("Failed to route Telegram message: %s", e, exc_info=True)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
@@ -879,6 +973,7 @@ routes = [
     Route("/api/local-model/stop", endpoint=api_local_model_stop, methods=["POST"]),
     Route("/api/local-model/status", endpoint=api_local_model_status),
     Route("/api/local-model/test", endpoint=api_local_model_test, methods=["POST"]),
+    Route("/api/telegram/webhook", endpoint=api_telegram_webhook, methods=["POST"]),
     WebSocketRoute("/ws", endpoint=ws_endpoint),
     Mount("/static", app=NoCacheStaticFiles(directory=str(web_dir)), name="static"),
 ]

@@ -164,6 +164,10 @@ class LocalChatBridge:
         """Called by the web UI to send a message to the agent."""
         self._inbox.put(text)
 
+    def push_message(self, task_data: Dict[str, Any]):
+        """Push a structured message (e.g., from Telegram webhook) to the inbox."""
+        self._inbox.put(task_data)
+
     def ui_receive(self, timeout: float = 0.1) -> Optional[Dict[str, Any]]:
         """Called by the web UI to check for new messages from the agent."""
         try:
