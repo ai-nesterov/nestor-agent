@@ -151,6 +151,7 @@ def persist_queue_snapshot(reason: str = "") -> None:
                 "task_kind": t.get("task_kind"), "caller_class": t.get("caller_class"),
                 "model_policy": t.get("model_policy"), "model_override": t.get("model_override"),
                 "importance": t.get("importance"), "defer_on_quota": t.get("defer_on_quota"),
+                "budget_decision": t.get("budget_decision"),
                 "_attempt": t.get("_attempt"), "review_reason": t.get("review_reason"),
                 "review_source_task_id": t.get("review_source_task_id"),
             },

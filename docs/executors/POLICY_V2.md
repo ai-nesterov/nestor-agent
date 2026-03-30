@@ -15,6 +15,7 @@ Scheduler now supports:
 - `model_override`: optional explicit model pin
 - `importance`: `low|medium|high|critical`
 - `defer_on_quota`: defer important blocked tasks instead of rejecting
+- `budget_decision`: `auto|defer|force_run` (agent-side budget decision)
 
 ## Budget-saving modes
 
@@ -24,6 +25,8 @@ Derived from daily-cap consumption:
 - `critical` (>=90%)
 
 In `conserve/critical`, premium/critical external runs can be blocked and deferred.
+`force_run` can bypass this soft-budget block (hard caps and capacity still apply).
+`defer` explicitly pushes the task into deferred queue even when capacity exists.
 
 ## Deferred queue
 
@@ -35,4 +38,3 @@ Use `resume_deferred_tasks(limit=...)` to re-admit when capacity is available.
 - consciousness/external remains controlled by dedicated flags.
 - review caller can use external workers when `*_ALLOWED_IN_REVIEW=true`.
 - evolution usage remains gated by `*_ALLOWED_IN_EVOLUTION`.
-

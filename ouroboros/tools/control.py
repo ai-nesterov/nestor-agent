@@ -31,6 +31,7 @@ _ALLOWED_ARTIFACT_POLICIES = {"patch_only", "keep_worktree"}
 _ALLOWED_QUOTA_CLASSES = {"cheap", "expensive"}
 _ALLOWED_MODEL_POLICIES = {"cheap", "balanced", "premium", "critical"}
 _ALLOWED_IMPORTANCE = {"low", "medium", "high", "critical"}
+_ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
 
 
 def _request_restart(ctx: ToolContext, reason: str) -> str:
@@ -76,6 +77,7 @@ def _schedule_task(
     model_override: str = "",
     importance: str = "medium",
     defer_on_quota: bool = True,
+    budget_decision: str = "auto",
 ) -> str:
     current_depth = getattr(ctx, 'task_depth', 0)
     new_depth = current_depth + 1
@@ -122,6 +124,12 @@ def _schedule_task(
             f"ERROR: Unknown importance '{importance}'. "
             f"Allowed: {', '.join(sorted(_ALLOWED_IMPORTANCE))}"
         )
+    budget_decision_value = str(budget_decision or "auto").strip().lower()
+    if budget_decision_value not in _ALLOWED_BUDGET_DECISIONS:
+        return (
+            f"ERROR: Unknown budget_decision '{budget_decision}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_BUDGET_DECISIONS))}"
+        )
     task_type_value = str(task_type or "task").strip().lower() or "task"
     task_kind_value = str(task_kind or "general").strip().lower() or "general"
     caller_class_value = str(caller_class or "").strip().lower()
@@ -156,6 +164,7 @@ def _schedule_task(
         "model_override": str(model_override or "").strip(),
         "importance": importance_value,
         "defer_on_quota": bool(defer_on_quota),
+        "budget_decision": budget_decision_value,
     }
     if context:
         evt["context"] = context
@@ -183,6 +192,7 @@ def _schedule_task(
             model_override=str(model_override or "").strip(),
             importance=importance_value,
             defer_on_quota=bool(defer_on_quota),
+            budget_decision=budget_decision_value,
             result="Task request queued. Awaiting supervisor acceptance.",
         )
     except Exception:
@@ -434,6 +444,7 @@ def get_tools() -> List[ToolEntry]:
                 "model_override": {"type": "string", "description": "optional explicit model pin for this task"},
                 "importance": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
                 "defer_on_quota": {"type": "boolean", "default": True, "description": "defer task instead of hard rejection when quota-policy blocks it"},
+                "budget_decision": {"type": "string", "enum": ["auto", "defer", "force_run"], "default": "auto", "description": "agent decision for soft budget policy"},
             }, "required": ["description"]},
         }, _schedule_task),
         ToolEntry("cancel_task", {

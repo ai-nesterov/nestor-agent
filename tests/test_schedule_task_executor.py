@@ -22,6 +22,7 @@ def test_schedule_task_persists_executor_metadata(tmp_path):
         artifact_policy="patch_only",
         quota_class="expensive",
         priority=3,
+        budget_decision="force_run",
     )
 
     assert "Task request queued" in result
@@ -31,11 +32,13 @@ def test_schedule_task_persists_executor_metadata(tmp_path):
     assert evt["constraints"]["require_structured_output"] is True
     assert evt["quota_class"] == "expensive"
     assert evt["priority"] == 3
+    assert evt["budget_decision"] == "force_run"
 
     task_id = evt["task_id"]
     data = json.loads((tmp_path / "task_results" / f"{task_id}.json").read_text(encoding="utf-8"))
     assert data["executor"] == "codex"
     assert data["artifact_policy"] == "patch_only"
+    assert data["budget_decision"] == "force_run"
 
 
 def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path, monkeypatch):
@@ -86,6 +89,7 @@ def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path, monkeypatch):
             "artifact_policy": "keep_worktree",
             "quota_class": "expensive",
             "priority": 4,
+            "budget_decision": "auto",
         },
         FakeCtx(),
     )
@@ -96,12 +100,14 @@ def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path, monkeypatch):
     assert task["executor_mode"] == "external_cli"
     assert task["artifact_policy"] == "keep_worktree"
     assert task["quota_class"] == "expensive"
+    assert task["budget_decision"] == "auto"
 
     snap = json.loads(q_module.QUEUE_SNAPSHOT_PATH.read_text(encoding="utf-8"))
     snap_task = snap["pending"][0]["task"]
     assert snap_task["executor"] == "claude_code"
     assert snap_task["repo_scope"] == ["supervisor", "ouroboros/tools"]
     assert snap_task["constraints"]["allow_network"] is False
+    assert snap_task["budget_decision"] == "auto"
     assert sent and sent[0][0] == 777
 
 

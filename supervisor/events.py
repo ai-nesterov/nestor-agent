@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 _PARENT_CONTEXT_MARKER = "[BEGIN_PARENT_CONTEXT"
 _PARENT_CONTEXT_END = "[END_PARENT_CONTEXT]"
 _ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
+_ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
 
 
 def _normalize_description(text: str) -> str:
@@ -42,6 +43,13 @@ def _normalize_executor(executor: Any) -> str:
     if value in _ALLOWED_EXECUTORS:
         return value
     return "ouroboros"
+
+
+def _normalize_budget_decision(value: Any) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized in _ALLOWED_BUDGET_DECISIONS:
+        return normalized
+    return "auto"
 
 
 def _truthy_env(name: str, default: bool = False) -> bool:
@@ -92,10 +100,13 @@ def _admission_check_external_executor(
     caller_class: str,
     model_policy: str,
     importance: str,
+    budget_decision: str,
     running: Dict[str, Any],
 ) -> Optional[str]:
     if executor == "ouroboros":
         return None
+    if budget_decision == "defer":
+        return "budget decision requested deferral"
     if not _truthy_env("EXTERNAL_EXECUTORS_ENABLED", False):
         return "external executors are disabled"
 
@@ -124,7 +135,12 @@ def _admission_check_external_executor(
             return "claude_code daily cap exhausted"
         mode = _compute_external_budget_mode(st)
         st["external_budget_mode"] = mode
-        if mode in {"conserve", "critical"} and model_policy in {"premium", "critical"} and importance in {"high", "critical"}:
+        if (
+            budget_decision != "force_run"
+            and mode in {"conserve", "critical"}
+            and model_policy in {"premium", "critical"}
+            and importance in {"high", "critical"}
+        ):
             return f"budget mode {mode} blocks premium external run"
         return None
 
@@ -153,7 +169,12 @@ def _admission_check_external_executor(
             return "codex daily cap exhausted"
         mode = _compute_external_budget_mode(st)
         st["external_budget_mode"] = mode
-        if mode in {"conserve", "critical"} and model_policy in {"premium", "critical"} and importance in {"high", "critical"}:
+        if (
+            budget_decision != "force_run"
+            and mode in {"conserve", "critical"}
+            and model_policy in {"premium", "critical"}
+            and importance in {"high", "critical"}
+        ):
             return f"budget mode {mode} blocks premium external run"
         return None
 
@@ -601,6 +622,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     model_override = str(evt.get("model_override") or "").strip()
     importance = str(evt.get("importance") or "medium").strip().lower() or "medium"
     defer_on_quota = bool(evt.get("defer_on_quota", True))
+    budget_decision = _normalize_budget_decision(evt.get("budget_decision"))
 
     # Check depth limit
     if depth > 3:
@@ -618,14 +640,21 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
             caller_class,
             model_policy,
             importance,
+            budget_decision,
             getattr(ctx, "RUNNING", {}),
         )
         if admission_error:
+            explicit_defer = budget_decision == "defer"
             can_defer = (
                 executor != "ouroboros"
                 and defer_on_quota
-                and importance in {"high", "critical"}
-                and any(k in admission_error for k in ("cap", "capacity", "budget mode"))
+                and (
+                    explicit_defer
+                    or (
+                        importance in {"high", "critical"}
+                        and any(k in admission_error for k in ("cap", "capacity", "budget mode"))
+                    )
+                )
             )
             if can_defer:
                 deferred = st.get("deferred_tasks")
@@ -642,6 +671,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                     "model_policy": model_policy,
                     "model_override": model_override,
                     "importance": importance,
+                    "budget_decision": budget_decision,
                     "repo_scope": repo_scope,
                     "constraints": constraints,
                     "artifact_policy": artifact_policy,
@@ -666,6 +696,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                         task_kind=task_kind,
                         model_policy=model_policy,
                         importance=importance,
+                        budget_decision=budget_decision,
                         result=f"Task deferred by quota policy: {admission_error}",
                     )
                 except Exception:
@@ -687,6 +718,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                     task_kind=task_kind,
                     model_policy=model_policy,
                     importance=importance,
+                    budget_decision=budget_decision,
                     result=f"Task rejected by executor admission policy: {admission_error}",
                 )
             except Exception:
@@ -751,6 +783,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
             "model_override": model_override,
             "importance": importance,
             "defer_on_quota": defer_on_quota,
+            "budget_decision": budget_decision,
         }
         if parent_id:
             task["parent_task_id"] = parent_id
@@ -780,6 +813,7 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                 model_override=model_override,
                 importance=importance,
                 defer_on_quota=defer_on_quota,
+                budget_decision=budget_decision,
                 result="Task accepted and scheduled.",
             )
         except Exception:
@@ -827,6 +861,7 @@ def _handle_resume_deferred_tasks(evt: Dict[str, Any], ctx: Any) -> None:
         caller_class = str(item.get("caller_class") or "main_task_agent").strip().lower() or "main_task_agent"
         model_policy = str(item.get("model_policy") or "balanced").strip().lower() or "balanced"
         importance = str(item.get("importance") or "medium").strip().lower() or "medium"
+        budget_decision = _normalize_budget_decision(item.get("budget_decision"))
         admission_error = _admission_check_external_executor(
             st,
             executor,
@@ -835,6 +870,7 @@ def _handle_resume_deferred_tasks(evt: Dict[str, Any], ctx: Any) -> None:
             caller_class,
             model_policy,
             importance,
+            budget_decision,
             getattr(ctx, "RUNNING", {}),
         )
         if admission_error:
@@ -868,6 +904,7 @@ def _handle_resume_deferred_tasks(evt: Dict[str, Any], ctx: Any) -> None:
             "model_override": str(item.get("model_override") or ""),
             "importance": importance,
             "defer_on_quota": bool(item.get("defer_on_quota", True)),
+            "budget_decision": budget_decision,
         }
         parent_id = item.get("parent_task_id")
         if parent_id:
