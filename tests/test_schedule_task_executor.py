@@ -38,9 +38,12 @@ def test_schedule_task_persists_executor_metadata(tmp_path):
     assert data["artifact_policy"] == "patch_only"
 
 
-def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path):
+def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path, monkeypatch):
     from supervisor import events as ev_module
     from supervisor import queue as q_module
+
+    monkeypatch.setenv("EXTERNAL_EXECUTORS_ENABLED", "true")
+    monkeypatch.setenv("CLAUDE_CODE_ENABLED", "true")
 
     pending = []
     running = {}
@@ -57,6 +60,9 @@ def test_schedule_task_event_roundtrip_to_queue_snapshot(tmp_path):
 
         def load_state(self):
             return {"owner_chat_id": 777}
+
+        def save_state(self, st):
+            return None
 
         def send_with_budget(self, chat_id, text, **kwargs):
             sent.append((chat_id, text))

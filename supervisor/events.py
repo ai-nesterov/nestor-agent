@@ -44,6 +44,82 @@ def _normalize_executor(executor: Any) -> str:
     return "ouroboros"
 
 
+def _truthy_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return int(default)
+
+
+def _maybe_reset_executor_quotas(st: Dict[str, Any]) -> bool:
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    if str(st.get("last_reset_at") or "") == today:
+        return False
+    st["last_reset_at"] = today
+    st["codex_runs_today"] = 0
+    st["claude_code_runs_today"] = 0
+    return True
+
+
+def _admission_check_external_executor(
+    st: Dict[str, Any],
+    executor: str,
+    task_type: str,
+    running: Dict[str, Any],
+) -> Optional[str]:
+    if executor == "ouroboros":
+        return None
+    if not _truthy_env("EXTERNAL_EXECUTORS_ENABLED", False):
+        return "external executors are disabled"
+
+    if executor == "claude_code":
+        if not _truthy_env("CLAUDE_CODE_ENABLED", False):
+            return "claude_code executor is disabled"
+        if task_type == "evolution" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", False):
+            return "claude_code is not allowed in evolution context"
+        active = sum(
+            1
+            for meta in running.values()
+            if isinstance(meta, dict)
+            and isinstance(meta.get("task"), dict)
+            and _normalize_executor(meta["task"].get("executor")) == "claude_code"
+        )
+        if active >= _int_env("CLAUDE_CODE_MAX_PARALLEL", 1):
+            return "claude_code parallel capacity exhausted"
+        cap = _int_env("CLAUDE_CODE_DAILY_TASK_CAP", 5)
+        if int(st.get("claude_code_runs_today") or 0) >= cap:
+            return "claude_code daily cap exhausted"
+        return None
+
+    if executor == "codex":
+        if not _truthy_env("CODEX_ENABLED", False):
+            return "codex executor is disabled"
+        if task_type == "evolution" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", False):
+            return "codex is not allowed in evolution context"
+        active = sum(
+            1
+            for meta in running.values()
+            if isinstance(meta, dict)
+            and isinstance(meta.get("task"), dict)
+            and _normalize_executor(meta["task"].get("executor")) == "codex"
+        )
+        if active >= _int_env("CODEX_MAX_PARALLEL", 1):
+            return "codex parallel capacity exhausted"
+        cap = _int_env("CODEX_DAILY_TASK_CAP", 5)
+        if int(st.get("codex_runs_today") or 0) >= cap:
+            return "codex daily cap exhausted"
+        return None
+
+    return f"unsupported executor '{executor}'"
+
+
 def _extract_task_description_and_context(task: Dict[str, Any]) -> tuple[str, str]:
     description = str(task.get("description") or "").strip()
     context = str(task.get("context") or "").strip()
@@ -465,6 +541,7 @@ def _find_duplicate_task(
 
 def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     st = ctx.load_state()
+    st_mutated = _maybe_reset_executor_quotas(st)
     owner_chat_id = st.get("owner_chat_id")
     tid = str(evt.get("task_id") or uuid.uuid4().hex[:8])
     desc = str(evt.get("description") or "").strip()
@@ -487,6 +564,32 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
         return
 
     if owner_chat_id and desc:
+        admission_error = _admission_check_external_executor(
+            st,
+            executor,
+            task_type,
+            getattr(ctx, "RUNNING", {}),
+        )
+        if admission_error:
+            try:
+                write_task_result(
+                    ctx.DRIVE_ROOT,
+                    tid,
+                    "failed",
+                    parent_task_id=parent_id,
+                    description=desc,
+                    context=task_context,
+                    executor=executor,
+                    result=f"Task rejected by executor admission policy: {admission_error}",
+                )
+            except Exception:
+                log.warning("Failed to persist rejected admission status for %s", tid, exc_info=True)
+            if owner_chat_id:
+                ctx.send_with_budget(int(owner_chat_id), f"⚠️ Task rejected: {admission_error}")
+            if st_mutated:
+                ctx.save_state(st)
+            return
+
         # --- Task deduplication (Bible P3: LLM-first, not hardcoded heuristics) ---
         from supervisor.queue import PENDING, RUNNING
         dup_id = _find_duplicate_task(
@@ -539,6 +642,11 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
         if parent_id:
             task["parent_task_id"] = parent_id
         ctx.enqueue_task(task)
+        if executor == "claude_code":
+            st["claude_code_runs_today"] = int(st.get("claude_code_runs_today") or 0) + 1
+        elif executor == "codex":
+            st["codex_runs_today"] = int(st.get("codex_runs_today") or 0) + 1
+        st_mutated = True
         try:
             write_task_result(
                 ctx.DRIVE_ROOT,
@@ -559,6 +667,8 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
             log.warning("Failed to persist scheduled task status for %s", tid, exc_info=True)
         ctx.send_with_budget(int(owner_chat_id), f"🗓️ Scheduled task {tid}: {desc}")
         ctx.persist_queue_snapshot(reason="schedule_task_event")
+        if st_mutated:
+            ctx.save_state(st)
 
 
 def _handle_cancel_task(evt: Dict[str, Any], ctx: Any) -> None:

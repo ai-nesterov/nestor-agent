@@ -151,6 +151,11 @@ def ensure_state_defaults(st: Dict[str, Any]) -> Dict[str, Any]:
     st.setdefault("budget_drift_alert", False)
     st.setdefault("evolution_consecutive_failures", 0)
     st.setdefault("bg_consciousness_enabled", False)
+    st.setdefault("codex_runs_today", 0)
+    st.setdefault("claude_code_runs_today", 0)
+    st.setdefault("codex_active", 0)
+    st.setdefault("claude_code_active", 0)
+    st.setdefault("last_reset_at", datetime.datetime.now(datetime.timezone.utc).date().isoformat())
     for legacy_key in ("approvals", "idle_cursor", "idle_stats", "last_idle_task_at",
                         "last_auto_review_at", "last_review_task_id", "session_daily_snapshot"):
         st.pop(legacy_key, None)
