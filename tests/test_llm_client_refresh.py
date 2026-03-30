@@ -493,5 +493,8 @@ class TestLlmClientRefresh(unittest.TestCase):
                     tool_choice="auto",
                 )
 
-        roles = [m.get("role") for m in (_FakeRequests.last_payload or {}).get("messages", [])]
-        self.assertEqual(roles, ["system", "system", "user", "assistant", "user"])
+        payload_messages = (_FakeRequests.last_payload or {}).get("messages", [])
+        roles = [m.get("role") for m in payload_messages]
+        self.assertEqual(roles, ["system", "user", "assistant", "user"])
+        self.assertIn("global", payload_messages[0].get("content", ""))
+        self.assertIn("late-system", payload_messages[0].get("content", ""))
