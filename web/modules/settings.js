@@ -159,9 +159,10 @@ export function initSettings({ ws, state }) {
                 <h3>Telegram Bot (optional)</h3>
                 <div class="form-row"><div class="form-field"><label>Telegram Bot Token</label><input id="s-tg-token" type="password" placeholder="123456:ABC-DEF..."></div></div>
                 <div class="form-row"><div class="form-field"><label>Webhook URL</label><input id="s-tg-webhook" placeholder="https://your-ngrok-url.ngrok.io/api/telegram/webhook" style="width:400px"></div></div>
+                <div class="form-row"><div class="form-field"><label>Internal Secret</label><input id="s-tg-secret" type="password" placeholder="Auto-generated or custom secret" style="width:300px"></div></div>
                 <div class="form-row">
                     <label class="local-toggle" style="font-size:14px"><input type="checkbox" id="s-tg-enabled"> Enable Telegram Bot</label>
-                    <div style="font-size:12px;color:var(--text-secondary);margin-top:18px">Get token from @BotFather. Use ngrok/localtunnel for webhook URL.</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-top:18px">Get token from @BotFather. Use ngrok/localtunnel for webhook URL. Secret is auto-generated if empty.</div>
                 </div>
             </div>
             <div class="divider"></div>
@@ -178,7 +179,7 @@ export function initSettings({ ws, state }) {
     `;
     document.getElementById('content').appendChild(page);
 
-    const secretInputIds = ['s-openrouter', 's-openai', 's-anthropic', 's-gh-token', 's-local-api-key'];
+    const secretInputIds = ['s-openrouter', 's-openai', 's-anthropic', 's-gh-token', 's-local-api-key', 's-tg-secret'];
     secretInputIds.forEach((id) => {
         const input = document.getElementById(id);
         input.addEventListener('focus', () => {
@@ -212,6 +213,7 @@ export function initSettings({ ws, state }) {
         if (s.GITHUB_REPO) document.getElementById('s-gh-repo').value = s.GITHUB_REPO;
         if (s.TELEGRAM_BOT_TOKEN) document.getElementById('s-tg-token').value = s.TELEGRAM_BOT_TOKEN;
         if (s.TELEGRAM_WEBHOOK_URL) document.getElementById('s-tg-webhook').value = s.TELEGRAM_WEBHOOK_URL;
+        if (s.TELEGRAM_INTERNAL_SECRET) document.getElementById('s-tg-secret').value = s.TELEGRAM_INTERNAL_SECRET;
         document.getElementById('s-tg-enabled').checked = s.TELEGRAM_BOT_ENABLED === true || s.TELEGRAM_BOT_ENABLED === 'True';
         if (s.LOCAL_MODEL_SOURCE) document.getElementById('s-local-source').value = s.LOCAL_MODEL_SOURCE;
         if (s.LOCAL_MODEL_BASE_URL) document.getElementById('s-local-base-url').value = s.LOCAL_MODEL_BASE_URL;
@@ -333,6 +335,7 @@ export function initSettings({ ws, state }) {
             GITHUB_REPO: document.getElementById('s-gh-repo').value,
             TELEGRAM_BOT_TOKEN: document.getElementById('s-tg-token').value.trim(),
             TELEGRAM_WEBHOOK_URL: document.getElementById('s-tg-webhook').value.trim(),
+            TELEGRAM_INTERNAL_SECRET: document.getElementById('s-tg-secret').value.trim(),
             TELEGRAM_BOT_ENABLED: document.getElementById('s-tg-enabled').checked,
             LOCAL_MODEL_SOURCE: document.getElementById('s-local-source').value,
             LOCAL_MODEL_BASE_URL: document.getElementById('s-local-base-url').value.trim(),
@@ -356,6 +359,8 @@ export function initSettings({ ws, state }) {
         if (ghToken && !ghToken.includes('...')) body.GITHUB_TOKEN = ghToken;
         const tgToken = document.getElementById('s-tg-token').value;
         if (tgToken && !tgToken.includes('...')) body.TELEGRAM_BOT_TOKEN = tgToken;
+        const tgSecret = document.getElementById('s-tg-secret').value;
+        if (tgSecret && !tgSecret.includes('...')) body.TELEGRAM_INTERNAL_SECRET = tgSecret;
         const localApiKey = document.getElementById('s-local-api-key').value;
         if (localApiKey && !localApiKey.includes('...')) body.LOCAL_MODEL_API_KEY = localApiKey;
 

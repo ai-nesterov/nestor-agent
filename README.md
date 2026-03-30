@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.5.2](https://img.shields.io/badge/version-4.5.2-green.svg)](VERSION)
+[![Version 4.6.0](https://img.shields.io/badge/version-4.6.0-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -247,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.6.0 | 2026-03-30 | Telegram bot architecture refactor: standalone aiogram 3.x process (`telegram_bot.py`) with webhook server, HTTP API communication with `server.py`, internal secret authentication, middleware, handlers for slash commands and text messages. New config fields (`TELEGRAM_INTERNAL_SECRET`, `TELEGRAM_BOT_PORT`), new endpoint `/api/telegram/process-message`, UI settings updated. Separation of concerns: bot runs independently from main server. |
 | 4.5.2 | 2026-03-30 | Telegram bot UI settings: added Telegram Bot Token, Webhook URL, and Enable toggle to Settings page. Users can now configure Telegram bot through the web interface. |
 | 4.5.1 | 2026-03-30 | Telegram bot integration: webhook endpoint, message routing via message_bus, telegram_send_message tool, config fields (TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_ENABLED, TELEGRAM_WEBHOOK_URL), automatic response handling for telegram_message task type. New file: ouroboros/tools/telegram.py with 4 tools (send_message, setup_webhook, get_webhook_info, get_me). |
 | 4.5.0 | 2026-03-19 | Context quality and prompt discipline release: fix provenance — system summaries now correctly marked as system, not user, across memory, consolidation, server API, and chat UI (amber system bubbles); restore execution reflections (task_reflections.jsonl) in live LLM context; move Health Invariants to the top of dynamic context block (both task and consciousness paths); task-scope recent progress/tools/events when task_id is available; harden run_shell against literal $VAR env-ref misuse in argv; add Claude CLI first-run retry and structured error classification; full SYSTEM.md editorial rewrite — terminology normalized to 'creator', new Methodology Check / Anti-Reactivity / Diagnostics Discipline / Knowledge Retrieval Triggers sections, stronger Health Invariant reactions, compressed inventory sections. 12 files changed, new regression tests. |
