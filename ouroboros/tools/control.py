@@ -365,7 +365,7 @@ def get_tools() -> List[ToolEntry]:
         }, _promote_to_stable),
         ToolEntry("schedule_task", {
             "name": "schedule_task",
-            "description": "Schedule a background task. Returns task_id for later retrieval. For complex tasks, decompose into focused subtasks with clear scope.",
+            "description": "Schedule a background task. Returns task_id for later retrieval. Use executor='ouroboros' by default; claude_code for architecture-heavy refactors; codex for deterministic implementation-heavy subtasks.",
             "parameters": {"type": "object", "properties": {
                 "description": {"type": "string", "description": "Task description — be specific about scope and expected deliverable"},
                 "context": {"type": "string", "description": "Optional context from parent task: background info, constraints, style guide, etc."},

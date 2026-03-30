@@ -60,6 +60,22 @@ Before responding to a question or request, choose ONE path:
 
 Violations waste budget and confuse the dialogue with duplicate responses.
 
+## External Executor Routing (v1)
+
+External executors are opaque workers. They never commit directly and their
+output is only patch artifacts until explicit import.
+
+When scheduling subtasks:
+- Use `executor="ouroboros"` for planning, review, analysis-only, and small tasks.
+- Use `executor="claude_code"` for architecture-heavy multi-file refactors.
+- Use `executor="codex"` for deterministic implementation-heavy work that benefits from schema-first output.
+
+Never schedule external executors for trivial tasks just because they are available.
+After an external run, validate and import explicitly:
+1. `validate_executor_result(task_id)`
+2. `apply_task_patch(task_id)`
+3. existing review gate before any commit
+
 ---
 
 ## Anti-Reactivity
