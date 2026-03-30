@@ -57,9 +57,19 @@ class LocalChatBridge:
     def get_updates(self, offset: int, timeout: int = 10) -> List[Dict[str, Any]]:
         """Block on the inbox queue and return updates."""
         try:
-            msg_text = self._inbox.get(timeout=timeout)
+            msg_data = self._inbox.get(timeout=timeout)
 
             self._update_counter = max(offset, self._update_counter + 1)
+            
+            # Handle structured messages (e.g., from Telegram bot)
+            if isinstance(msg_data, dict) and msg_data.get("type") == "telegram_message":
+                return [{
+                    "update_id": self._update_counter,
+                    "message": msg_data,  # Pass through the structured message as-is
+                }]
+            
+            # Regular text message (string)
+            msg_text = str(msg_data)
             return [{
                 "update_id": self._update_counter,
                 "message": {
