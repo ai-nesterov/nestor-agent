@@ -591,6 +591,90 @@ async def api_state(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def api_executor_status(request: Request) -> JSONResponse:
+    import subprocess
+
+    def _run_status(cmd: list[str], timeout_sec: float = 8.0) -> tuple[bool, str]:
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(REPO_DIR),
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+            out = (proc.stdout or "").strip()
+            err = (proc.stderr or "").strip()
+            if proc.returncode != 0:
+                return False, (err or out or f"exit={proc.returncode}")
+            return True, out
+        except Exception as exc:
+            return False, str(exc)
+
+    try:
+        from supervisor.state import load_state
+        st = load_state()
+        settings = load_settings()
+
+        codex_ok, codex_raw = _run_status(["codex", "login", "status"])
+        claude_ok, claude_raw = _run_status(["claude", "auth", "status"])
+
+        claude_json = {}
+        if claude_ok:
+            try:
+                claude_json = json.loads(claude_raw)
+            except Exception:
+                claude_json = {}
+
+        codex_logged_in = codex_ok and ("logged in" in codex_raw.lower())
+        codex_auth_method = "unknown"
+        if codex_logged_in:
+            low = codex_raw.lower()
+            if "chatgpt" in low:
+                codex_auth_method = "chatgpt"
+            elif "api" in low:
+                codex_auth_method = "api"
+
+        codex_cap = int(settings.get("CODEX_DAILY_TASK_CAP", 5) or 5)
+        claude_cap = int(settings.get("CLAUDE_CODE_DAILY_TASK_CAP", 5) or 5)
+        codex_used = int(st.get("codex_runs_today") or 0)
+        claude_used = int(st.get("claude_code_runs_today") or 0)
+
+        return JSONResponse(
+            {
+                "external_budget_mode": str(st.get("external_budget_mode") or "normal"),
+                "deferred_tasks_count": len(st.get("deferred_tasks") or []),
+                "codex": {
+                    "status_ok": codex_ok,
+                    "raw_status": codex_raw,
+                    "logged_in": codex_logged_in,
+                    "auth_method": codex_auth_method,
+                    "daily_cap": codex_cap,
+                    "daily_used": codex_used,
+                    "daily_remaining": max(0, codex_cap - codex_used),
+                },
+                "claude": {
+                    "status_ok": claude_ok,
+                    "raw_status": claude_raw,
+                    "logged_in": bool(claude_json.get("loggedIn")) if claude_json else claude_ok,
+                    "auth_method": str(claude_json.get("authMethod") or "unknown"),
+                    "subscription_type": str(claude_json.get("subscriptionType") or "unknown"),
+                    "daily_cap": claude_cap,
+                    "daily_used": claude_used,
+                    "daily_remaining": max(0, claude_cap - claude_used),
+                },
+                "provider_window_limits": {
+                    "five_hour_remaining": None,
+                    "weekly_remaining": None,
+                    "source": "cli_not_exposed",
+                    "note": "Codex/Claude CLI currently do not expose 5h/week remaining quotas in status output.",
+                },
+            }
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 async def api_settings_get(request: Request) -> JSONResponse:
     settings = load_settings()
     safe = {k: v for k, v in settings.items()}
@@ -1014,6 +1098,7 @@ routes = [
     Route("/", endpoint=index_page),
     Route("/api/health", endpoint=api_health),
     Route("/api/state", endpoint=api_state),
+    Route("/api/executor/status", endpoint=api_executor_status),
     Route("/api/settings", endpoint=api_settings_get, methods=["GET"]),
     Route("/api/settings", endpoint=api_settings_post, methods=["POST"]),
     Route("/api/command", endpoint=api_command, methods=["POST"]),

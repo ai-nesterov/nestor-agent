@@ -26,6 +26,12 @@ from ouroboros.utils import utc_now_iso, write_text, run_cmd
 log = logging.getLogger(__name__)
 
 MAX_SUBTASK_DEPTH = 3
+_ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
+_ALLOWED_ARTIFACT_POLICIES = {"patch_only", "keep_worktree"}
+_ALLOWED_QUOTA_CLASSES = {"cheap", "expensive"}
+_ALLOWED_MODEL_POLICIES = {"cheap", "balanced", "premium", "critical"}
+_ALLOWED_IMPORTANCE = {"low", "medium", "high", "critical"}
+_ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
 
 
 def _request_restart(ctx: ToolContext, reason: str) -> str:
@@ -53,7 +59,26 @@ def _promote_to_stable(ctx: ToolContext, reason: str) -> str:
     return f"Promote to stable requested: {reason}"
 
 
-def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent_task_id: str = "") -> str:
+def _schedule_task(
+    ctx: ToolContext,
+    description: str,
+    context: str = "",
+    parent_task_id: str = "",
+    executor: str = "ouroboros",
+    repo_scope: List[str] | None = None,
+    constraints: Dict[str, Any] | None = None,
+    artifact_policy: str = "patch_only",
+    quota_class: str = "cheap",
+    priority: int = 0,
+    task_type: str = "task",
+    task_kind: str = "general",
+    caller_class: str = "",
+    model_policy: str = "balanced",
+    model_override: str = "",
+    importance: str = "medium",
+    defer_on_quota: bool = True,
+    budget_decision: str = "auto",
+) -> str:
     current_depth = getattr(ctx, 'task_depth', 0)
     new_depth = current_depth + 1
     if new_depth > MAX_SUBTASK_DEPTH:
@@ -71,8 +96,76 @@ def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent
         except Exception:
             pass
 
+    executor_value = str(executor or "ouroboros").strip().lower()
+    if executor_value not in _ALLOWED_EXECUTORS:
+        return f"ERROR: Unknown executor '{executor}'. Allowed: {', '.join(sorted(_ALLOWED_EXECUTORS))}"
+    artifact_policy_value = str(artifact_policy or "patch_only").strip().lower()
+    if artifact_policy_value not in _ALLOWED_ARTIFACT_POLICIES:
+        return (
+            f"ERROR: Unknown artifact_policy '{artifact_policy}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_ARTIFACT_POLICIES))}"
+        )
+    quota_class_value = str(quota_class or "cheap").strip().lower()
+    if quota_class_value not in _ALLOWED_QUOTA_CLASSES:
+        return (
+            f"ERROR: Unknown quota_class '{quota_class}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_QUOTA_CLASSES))}"
+        )
+
+    model_policy_value = str(model_policy or "balanced").strip().lower()
+    if model_policy_value not in _ALLOWED_MODEL_POLICIES:
+        return (
+            f"ERROR: Unknown model_policy '{model_policy}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_MODEL_POLICIES))}"
+        )
+    importance_value = str(importance or "medium").strip().lower()
+    if importance_value not in _ALLOWED_IMPORTANCE:
+        return (
+            f"ERROR: Unknown importance '{importance}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_IMPORTANCE))}"
+        )
+    budget_decision_value = str(budget_decision or "auto").strip().lower()
+    if budget_decision_value not in _ALLOWED_BUDGET_DECISIONS:
+        return (
+            f"ERROR: Unknown budget_decision '{budget_decision}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_BUDGET_DECISIONS))}"
+        )
+    task_type_value = str(task_type or "task").strip().lower() or "task"
+    task_kind_value = str(task_kind or "general").strip().lower() or "general"
+    caller_class_value = str(caller_class or "").strip().lower()
+    if not caller_class_value:
+        if str(getattr(ctx, "current_task_type", "")).lower() == "consciousness":
+            caller_class_value = "consciousness"
+        elif str(getattr(ctx, "current_task_type", "")).lower() == "review":
+            caller_class_value = "review"
+        else:
+            caller_class_value = "main_task_agent"
+
+    safe_repo_scope = [str(p) for p in (repo_scope or []) if str(p).strip()]
+    safe_constraints = dict(constraints or {})
+
     tid = uuid.uuid4().hex[:8]
-    evt = {"type": "schedule_task", "description": description, "task_id": tid, "depth": new_depth, "ts": utc_now_iso()}
+    evt = {
+        "type": "schedule_task",
+        "description": description,
+        "task_id": tid,
+        "depth": new_depth,
+        "ts": utc_now_iso(),
+        "executor": executor_value,
+        "repo_scope": safe_repo_scope,
+        "constraints": safe_constraints,
+        "artifact_policy": artifact_policy_value,
+        "quota_class": quota_class_value,
+        "priority": int(priority),
+        "task_type": task_type_value,
+        "task_kind": task_kind_value,
+        "caller_class": caller_class_value,
+        "model_policy": model_policy_value,
+        "model_override": str(model_override or "").strip(),
+        "importance": importance_value,
+        "defer_on_quota": bool(defer_on_quota),
+        "budget_decision": budget_decision_value,
+    }
     if context:
         evt["context"] = context
     if parent_task_id:
@@ -86,11 +179,25 @@ def _schedule_task(ctx: ToolContext, description: str, context: str = "", parent
             parent_task_id=parent_task_id or None,
             description=description,
             context=context,
+            executor=executor_value,
+            repo_scope=safe_repo_scope,
+            constraints=safe_constraints,
+            artifact_policy=artifact_policy_value,
+            quota_class=quota_class_value,
+            priority=int(priority),
+            task_type=task_type_value,
+            task_kind=task_kind_value,
+            caller_class=caller_class_value,
+            model_policy=model_policy_value,
+            model_override=str(model_override or "").strip(),
+            importance=importance_value,
+            defer_on_quota=bool(defer_on_quota),
+            budget_decision=budget_decision_value,
             result="Task request queued. Awaiting supervisor acceptance.",
         )
     except Exception:
         log.warning("Failed to persist requested task status for %s", tid, exc_info=True)
-    return f"Task request queued {tid}: {description}"
+    return f"Task request queued {tid} ({executor_value}): {description}"
 
 
 def _cancel_task(ctx: ToolContext, task_id: str) -> str:
@@ -258,8 +365,17 @@ def _get_task_result(ctx: ToolContext, task_id: str) -> str:
     result = data.get("result", "")
     cost = data.get("cost_usd", 0)
     trace = data.get("trace_summary", "")
+    executor = str(data.get("executor") or "ouroboros")
+    changed_files = data.get("changed_files") or []
+    diff_stat = data.get("diff_stat") or {}
+    artifact_dir = data.get("artifact_dir")
+    tests_run = data.get("tests_run") or []
+    tests_passed = data.get("tests_passed")
     if status == STATUS_COMPLETED:
-        output = f"Task {task_id} [{status}]: cost=${cost:.2f}\n\n[BEGIN_SUBTASK_OUTPUT]\n{result}\n[END_SUBTASK_OUTPUT]"
+        output = (
+            f"Task {task_id} [{status}]: executor={executor}, cost=${cost:.2f}\n\n"
+            f"[BEGIN_SUBTASK_OUTPUT]\n{result}\n[END_SUBTASK_OUTPUT]"
+        )
     elif status == STATUS_REJECTED_DUPLICATE:
         duplicate_of = str(data.get("duplicate_of") or "?")
         output = (
@@ -267,7 +383,20 @@ def _get_task_result(ctx: ToolContext, task_id: str) -> str:
             f"{result or f'Task was rejected as a duplicate of {duplicate_of}.'}"
         )
     else:
-        output = f"Task {task_id} [{status}]: {result or 'No details available.'}"
+        output = f"Task {task_id} [{status}]: executor={executor} {result or 'No details available.'}"
+    if changed_files:
+        output += f"\n\n[CHANGED_FILES]\n" + "\n".join(f"- {p}" for p in changed_files)
+    if diff_stat:
+        output += (
+            "\n\n[DIFF_STAT]\n"
+            f"files={int(diff_stat.get('files') or 0)}, "
+            f"insertions={int(diff_stat.get('insertions') or 0)}, "
+            f"deletions={int(diff_stat.get('deletions') or 0)}"
+        )
+    if tests_run or tests_passed is not None:
+        output += f"\n\n[TESTS]\npassed={tests_passed}\nrun={tests_run}"
+    if artifact_dir:
+        output += f"\n\n[ARTIFACT_DIR]\n{artifact_dir}\n[IMPORT_HINT]\nUse apply_task_patch(task_id=\"{task_id}\") after validate_executor_result."
     if trace:
         output += f"\n\n[SUBTASK_TRACE]\n{trace}\n[/SUBTASK_TRACE]"
     return output
@@ -276,6 +405,11 @@ def _get_task_result(ctx: ToolContext, task_id: str) -> str:
 def _wait_for_task(ctx: ToolContext, task_id: str) -> str:
     """Check if a subtask has completed. Call repeatedly to poll."""
     return _get_task_result(ctx, task_id)
+
+
+def _resume_deferred_tasks(ctx: ToolContext, limit: int = 20) -> str:
+    ctx.pending_events.append({"type": "resume_deferred_tasks", "limit": int(limit), "ts": utc_now_iso()})
+    return f"Resume deferred tasks requested (limit={int(limit)})."
 
 
 def get_tools() -> List[ToolEntry]:
@@ -292,11 +426,25 @@ def get_tools() -> List[ToolEntry]:
         }, _promote_to_stable),
         ToolEntry("schedule_task", {
             "name": "schedule_task",
-            "description": "Schedule a background task. Returns task_id for later retrieval. For complex tasks, decompose into focused subtasks with clear scope.",
+            "description": "Schedule a background task. Returns task_id for later retrieval. Use executor='ouroboros' by default; claude_code for architecture-heavy refactors; codex for deterministic implementation-heavy subtasks.",
             "parameters": {"type": "object", "properties": {
                 "description": {"type": "string", "description": "Task description — be specific about scope and expected deliverable"},
                 "context": {"type": "string", "description": "Optional context from parent task: background info, constraints, style guide, etc."},
                 "parent_task_id": {"type": "string", "description": "Optional parent task ID for tracking lineage"},
+                "executor": {"type": "string", "enum": ["ouroboros", "claude_code", "codex"], "default": "ouroboros"},
+                "repo_scope": {"type": "array", "items": {"type": "string"}, "description": "Optional path scopes relevant to this task"},
+                "constraints": {"type": "object", "description": "Execution constraints for worker runtime"},
+                "artifact_policy": {"type": "string", "enum": ["patch_only", "keep_worktree"], "default": "patch_only"},
+                "quota_class": {"type": "string", "enum": ["cheap", "expensive"], "default": "cheap"},
+                "priority": {"type": "integer", "default": 0},
+                "task_type": {"type": "string", "default": "task", "description": "queue task type: task|review|evolution"},
+                "task_kind": {"type": "string", "default": "general", "description": "semantic task class: general|review_plan|review_code|refactor_plan|evolution_plan|implement"},
+                "caller_class": {"type": "string", "default": "main_task_agent", "description": "caller class for policy routing"},
+                "model_policy": {"type": "string", "enum": ["cheap", "balanced", "premium", "critical"], "default": "balanced"},
+                "model_override": {"type": "string", "description": "optional explicit model pin for this task"},
+                "importance": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
+                "defer_on_quota": {"type": "boolean", "default": True, "description": "defer task instead of hard rejection when quota-policy blocks it"},
+                "budget_decision": {"type": "string", "enum": ["auto", "defer", "force_run"], "default": "auto", "description": "agent decision for soft budget policy"},
             }, "required": ["description"]},
         }, _schedule_task),
         ToolEntry("cancel_task", {
@@ -389,4 +537,11 @@ def get_tools() -> List[ToolEntry]:
                 "task_id": {"type": "string", "description": "Task ID to check"},
             }},
         }, _wait_for_task),
+        ToolEntry("resume_deferred_tasks", {
+            "name": "resume_deferred_tasks",
+            "description": "Attempt to re-admit deferred external tasks after quota reset or policy changes.",
+            "parameters": {"type": "object", "required": [], "properties": {
+                "limit": {"type": "integer", "default": 20},
+            }},
+        }, _resume_deferred_tasks),
     ]

@@ -30,6 +30,155 @@ log = logging.getLogger(__name__)
 
 _PARENT_CONTEXT_MARKER = "[BEGIN_PARENT_CONTEXT"
 _PARENT_CONTEXT_END = "[END_PARENT_CONTEXT]"
+_ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
+_ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
+
+
+def _normalize_description(text: str) -> str:
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def _normalize_executor(executor: Any) -> str:
+    value = str(executor or "ouroboros").strip().lower()
+    if value in _ALLOWED_EXECUTORS:
+        return value
+    return "ouroboros"
+
+
+def _normalize_budget_decision(value: Any) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized in _ALLOWED_BUDGET_DECISIONS:
+        return normalized
+    return "auto"
+
+
+def _truthy_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return int(default)
+
+
+def _maybe_reset_executor_quotas(st: Dict[str, Any]) -> bool:
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    if str(st.get("last_reset_at") or "") == today:
+        return False
+    st["last_reset_at"] = today
+    st["codex_runs_today"] = 0
+    st["claude_code_runs_today"] = 0
+    return True
+
+
+def _ratio(used: int, cap: int) -> float:
+    c = max(1, int(cap))
+    return max(0.0, float(used) / float(c))
+
+
+def _compute_external_budget_mode(st: Dict[str, Any]) -> str:
+    codex_ratio = _ratio(int(st.get("codex_runs_today") or 0), _int_env("CODEX_DAILY_TASK_CAP", 5))
+    claude_ratio = _ratio(int(st.get("claude_code_runs_today") or 0), _int_env("CLAUDE_CODE_DAILY_TASK_CAP", 5))
+    peak = max(codex_ratio, claude_ratio)
+    if peak >= 0.9:
+        return "critical"
+    if peak >= 0.7:
+        return "conserve"
+    return "normal"
+
+
+def _admission_check_external_executor(
+    st: Dict[str, Any],
+    executor: str,
+    task_type: str,
+    task_kind: str,
+    caller_class: str,
+    model_policy: str,
+    importance: str,
+    budget_decision: str,
+    running: Dict[str, Any],
+) -> Optional[str]:
+    if executor == "ouroboros":
+        return None
+    if budget_decision == "defer":
+        return "budget decision requested deferral"
+    if not _truthy_env("EXTERNAL_EXECUTORS_ENABLED", False):
+        return "external executors are disabled"
+
+    if executor == "claude_code":
+        if not _truthy_env("CLAUDE_CODE_ENABLED", False):
+            return "claude_code executor is disabled"
+        if caller_class == "consciousness" and not _truthy_env("CLAUDE_ALLOWED_IN_CONSCIOUSNESS", False):
+            return "claude_code is not allowed for consciousness caller"
+        if caller_class == "review" and not _truthy_env("CLAUDE_ALLOWED_IN_REVIEW", True):
+            return "claude_code is not allowed for review caller"
+        if task_type == "evolution" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", False):
+            return "claude_code is not allowed in evolution context"
+        if task_kind == "evolution_plan" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", False):
+            return "claude_code evolution planning is disabled by policy"
+        active = sum(
+            1
+            for meta in running.values()
+            if isinstance(meta, dict)
+            and isinstance(meta.get("task"), dict)
+            and _normalize_executor(meta["task"].get("executor")) == "claude_code"
+        )
+        if active >= _int_env("CLAUDE_CODE_MAX_PARALLEL", 1):
+            return "claude_code parallel capacity exhausted"
+        cap = _int_env("CLAUDE_CODE_DAILY_TASK_CAP", 5)
+        if int(st.get("claude_code_runs_today") or 0) >= cap:
+            return "claude_code daily cap exhausted"
+        mode = _compute_external_budget_mode(st)
+        st["external_budget_mode"] = mode
+        if (
+            budget_decision != "force_run"
+            and mode in {"conserve", "critical"}
+            and model_policy in {"premium", "critical"}
+            and importance in {"high", "critical"}
+        ):
+            return f"budget mode {mode} blocks premium external run"
+        return None
+
+    if executor == "codex":
+        if not _truthy_env("CODEX_ENABLED", False):
+            return "codex executor is disabled"
+        if caller_class == "consciousness" and not _truthy_env("CODEX_ALLOWED_IN_CONSCIOUSNESS", False):
+            return "codex is not allowed for consciousness caller"
+        if caller_class == "review" and not _truthy_env("CODEX_ALLOWED_IN_REVIEW", True):
+            return "codex is not allowed for review caller"
+        if task_type == "evolution" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", False):
+            return "codex is not allowed in evolution context"
+        if task_kind == "evolution_plan" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", False):
+            return "codex evolution planning is disabled by policy"
+        active = sum(
+            1
+            for meta in running.values()
+            if isinstance(meta, dict)
+            and isinstance(meta.get("task"), dict)
+            and _normalize_executor(meta["task"].get("executor")) == "codex"
+        )
+        if active >= _int_env("CODEX_MAX_PARALLEL", 1):
+            return "codex parallel capacity exhausted"
+        cap = _int_env("CODEX_DAILY_TASK_CAP", 5)
+        if int(st.get("codex_runs_today") or 0) >= cap:
+            return "codex daily cap exhausted"
+        mode = _compute_external_budget_mode(st)
+        st["external_budget_mode"] = mode
+        if (
+            budget_decision != "force_run"
+            and mode in {"conserve", "critical"}
+            and model_policy in {"premium", "critical"}
+            and importance in {"high", "critical"}
+        ):
+            return f"budget mode {mode} blocks premium external run"
+        return None
+
+    return f"unsupported executor '{executor}'"
 
 
 def _extract_task_description_and_context(task: Dict[str, Any]) -> tuple[str, str]:
@@ -52,9 +201,27 @@ def _extract_task_description_and_context(task: Dict[str, Any]) -> tuple[str, st
     return description, context
 
 
-def _format_task_for_dedup(task_id: str, description: str, context: str) -> str:
+def _extract_dedup_metadata(task: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": str(task.get("type") or "task").strip().lower(),
+        "executor": _normalize_executor(task.get("executor")),
+        "parent_task_id": str(task.get("parent_task_id") or "").strip() or None,
+    }
+
+
+def _format_task_for_dedup(
+    task_id: str,
+    description: str,
+    context: str,
+    task_type: str,
+    executor: str,
+    parent_task_id: Optional[str],
+) -> str:
     return (
         f"Task ID: {task_id}\n"
+        f"Type: {task_type or 'task'}\n"
+        f"Executor: {executor or 'ouroboros'}\n"
+        f"Parent Task ID: {parent_task_id or '(none)'}\n"
         f"Description:\n{description or '(empty)'}\n\n"
         f"Context:\n{context or '(none)'}"
     )
@@ -330,7 +497,16 @@ def _handle_promote_to_stable(evt: Dict[str, Any], ctx: Any) -> None:
         )
 
 
-def _find_duplicate_task(desc: str, task_context: str, pending: list, running: dict) -> Optional[str]:
+def _find_duplicate_task(
+    desc: str,
+    task_context: str,
+    pending: list,
+    running: dict,
+    *,
+    task_type: str = "task",
+    executor: str = "ouroboros",
+    parent_task_id: Optional[str] = None,
+) -> Optional[str]:
     """Check if a semantically similar task already exists using a light LLM call.
 
     Bible P3 (LLM-first): dedup decisions are cognitive judgments, not hardcoded
@@ -339,14 +515,23 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
     Returns task_id of the duplicate if found, None otherwise.
     On any error (API, timeout, import) — returns None (accept the task).
     """
+    normalized_desc = _normalize_description(desc)
+    normalized_type = str(task_type or "task").strip().lower()
+    normalized_executor = _normalize_executor(executor)
+    normalized_parent = str(parent_task_id or "").strip() or None
     existing = []
     for task in pending:
         description, context = _extract_task_description_and_context(task)
         if description.strip():
+            meta = _extract_dedup_metadata(task)
             existing.append({
                 "id": str(task.get("id", "?")),
                 "description": description,
                 "context": context,
+                "type": meta["type"],
+                "executor": meta["executor"],
+                "parent_task_id": meta["parent_task_id"],
+                "normalized_description": _normalize_description(description),
             })
     for task_id, meta in running.items():
         task_data = meta.get("task") if isinstance(meta, dict) else None
@@ -354,26 +539,40 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
             continue
         description, context = _extract_task_description_and_context(task_data)
         if description.strip():
+            meta = _extract_dedup_metadata(task_data)
             existing.append({
                 "id": str(task_id),
                 "description": description,
                 "context": context,
+                "type": meta["type"],
+                "executor": meta["executor"],
+                "parent_task_id": meta["parent_task_id"],
+                "normalized_description": _normalize_description(description),
             })
 
-    if not existing:
+    candidates = [
+        e for e in existing
+        if e["type"] == normalized_type
+        and e["executor"] == normalized_executor
+        and e["parent_task_id"] == normalized_parent
+        and e["normalized_description"] == normalized_desc
+    ]
+    if not candidates:
         return None
 
     existing_lines = "\n\n".join(
-        _format_task_for_dedup(e["id"], e["description"], e["context"])
-        for e in existing
+        _format_task_for_dedup(
+            e["id"], e["description"], e["context"], e["type"], e["executor"], e["parent_task_id"]
+        )
+        for e in candidates
     )
     prompt = (
         "Determine whether the NEW task is a true duplicate of any EXISTING active task.\n"
         "Only return a task ID if the requested work is materially the same.\n"
         "Tasks that share a broad goal but differ in target model, creative focus, "
-        "scope, parent context, or intended output are NOT duplicates.\n\n"
+        "scope, executor, parent context, or intended output are NOT duplicates.\n\n"
         "NEW TASK\n"
-        f"{_format_task_for_dedup('NEW', desc, task_context)}\n\n"
+        f"{_format_task_for_dedup('NEW', desc, task_context, normalized_type, normalized_executor, normalized_parent)}\n\n"
         f"EXISTING ACTIVE TASKS\n{existing_lines}\n\n"
         "Reply ONLY with the task ID if duplicate, or NONE if not."
     )
@@ -392,7 +591,7 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
         if answer.upper() == "NONE" or not answer:
             return None
         answer_lower = answer.lower()
-        for e in existing:
+        for e in candidates:
             if e["id"].lower() in answer_lower:
                 return e["id"]
         return None
@@ -403,12 +602,27 @@ def _find_duplicate_task(desc: str, task_context: str, pending: list, running: d
 
 def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     st = ctx.load_state()
+    st_mutated = _maybe_reset_executor_quotas(st)
     owner_chat_id = st.get("owner_chat_id")
     tid = str(evt.get("task_id") or uuid.uuid4().hex[:8])
     desc = str(evt.get("description") or "").strip()
     task_context = str(evt.get("context") or "").strip()
     depth = int(evt.get("depth", 0))
     parent_id = evt.get("parent_task_id")
+    task_type = str(evt.get("task_type") or "task").strip().lower() or "task"
+    executor = _normalize_executor(evt.get("executor"))
+    repo_scope = [str(p) for p in (evt.get("repo_scope") or []) if str(p).strip()]
+    constraints = evt.get("constraints") if isinstance(evt.get("constraints"), dict) else {}
+    artifact_policy = str(evt.get("artifact_policy") or "patch_only").strip().lower()
+    quota_class = str(evt.get("quota_class") or "cheap").strip().lower()
+    priority = int(evt.get("priority") or 0)
+    task_kind = str(evt.get("task_kind") or "general").strip().lower() or "general"
+    caller_class = str(evt.get("caller_class") or "main_task_agent").strip().lower() or "main_task_agent"
+    model_policy = str(evt.get("model_policy") or "balanced").strip().lower() or "balanced"
+    model_override = str(evt.get("model_override") or "").strip()
+    importance = str(evt.get("importance") or "medium").strip().lower() or "medium"
+    defer_on_quota = bool(evt.get("defer_on_quota", True))
+    budget_decision = _normalize_budget_decision(evt.get("budget_decision"))
 
     # Check depth limit
     if depth > 3:
@@ -418,9 +632,114 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
         return
 
     if owner_chat_id and desc:
+        admission_error = _admission_check_external_executor(
+            st,
+            executor,
+            task_type,
+            task_kind,
+            caller_class,
+            model_policy,
+            importance,
+            budget_decision,
+            getattr(ctx, "RUNNING", {}),
+        )
+        if admission_error:
+            explicit_defer = budget_decision == "defer"
+            can_defer = (
+                executor != "ouroboros"
+                and defer_on_quota
+                and (
+                    explicit_defer
+                    or (
+                        importance in {"high", "critical"}
+                        and any(k in admission_error for k in ("cap", "capacity", "budget mode"))
+                    )
+                )
+            )
+            if can_defer:
+                deferred = st.get("deferred_tasks")
+                if not isinstance(deferred, list):
+                    deferred = []
+                deferred.append({
+                    "task_id": tid,
+                    "description": desc,
+                    "context": task_context,
+                    "executor": executor,
+                    "task_type": task_type,
+                    "task_kind": task_kind,
+                    "caller_class": caller_class,
+                    "model_policy": model_policy,
+                    "model_override": model_override,
+                    "importance": importance,
+                    "budget_decision": budget_decision,
+                    "repo_scope": repo_scope,
+                    "constraints": constraints,
+                    "artifact_policy": artifact_policy,
+                    "quota_class": quota_class,
+                    "priority": priority,
+                    "parent_task_id": parent_id,
+                    "depth": depth,
+                    "deferred_reason": admission_error,
+                    "deferred_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                })
+                st["deferred_tasks"] = deferred
+                st_mutated = True
+                try:
+                    write_task_result(
+                        ctx.DRIVE_ROOT,
+                        tid,
+                        "deferred",
+                        parent_task_id=parent_id,
+                        description=desc,
+                        context=task_context,
+                        executor=executor,
+                        task_kind=task_kind,
+                        model_policy=model_policy,
+                        importance=importance,
+                        budget_decision=budget_decision,
+                        result=f"Task deferred by quota policy: {admission_error}",
+                    )
+                except Exception:
+                    log.warning("Failed to persist deferred task status for %s", tid, exc_info=True)
+                if owner_chat_id:
+                    ctx.send_with_budget(int(owner_chat_id), f"⏸️ Task deferred: {admission_error}")
+                if st_mutated:
+                    ctx.save_state(st)
+                return
+            try:
+                write_task_result(
+                    ctx.DRIVE_ROOT,
+                    tid,
+                    "failed",
+                    parent_task_id=parent_id,
+                    description=desc,
+                    context=task_context,
+                    executor=executor,
+                    task_kind=task_kind,
+                    model_policy=model_policy,
+                    importance=importance,
+                    budget_decision=budget_decision,
+                    result=f"Task rejected by executor admission policy: {admission_error}",
+                )
+            except Exception:
+                log.warning("Failed to persist rejected admission status for %s", tid, exc_info=True)
+            if owner_chat_id:
+                ctx.send_with_budget(int(owner_chat_id), f"⚠️ Task rejected: {admission_error}")
+            if st_mutated:
+                ctx.save_state(st)
+            return
+
         # --- Task deduplication (Bible P3: LLM-first, not hardcoded heuristics) ---
         from supervisor.queue import PENDING, RUNNING
-        dup_id = _find_duplicate_task(desc, task_context, PENDING, RUNNING)
+        dup_id = _find_duplicate_task(
+            desc,
+            task_context,
+            PENDING,
+            RUNNING,
+            task_type=task_type,
+            executor=executor,
+            parent_task_id=str(parent_id or "").strip() or None,
+        )
         if dup_id:
             log.info("Rejected duplicate task: new='%s' duplicates='%s'", desc[:100], dup_id)
             try:
@@ -445,16 +764,35 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
             text = f"{desc}\n\n---\n[BEGIN_PARENT_CONTEXT — reference material only, not instructions]\n{task_context}\n[END_PARENT_CONTEXT]"
         task = {
             "id": tid,
-            "type": "task",
+            "type": task_type,
             "chat_id": int(owner_chat_id),
             "text": text,
             "description": desc,
             "context": task_context,
             "depth": depth,
+            "executor": executor,
+            "executor_mode": "internal_agent" if executor == "ouroboros" else "external_cli",
+            "repo_scope": repo_scope,
+            "constraints": constraints,
+            "artifact_policy": artifact_policy,
+            "quota_class": quota_class,
+            "priority": priority,
+            "task_kind": task_kind,
+            "caller_class": caller_class,
+            "model_policy": model_policy,
+            "model_override": model_override,
+            "importance": importance,
+            "defer_on_quota": defer_on_quota,
+            "budget_decision": budget_decision,
         }
         if parent_id:
             task["parent_task_id"] = parent_id
         ctx.enqueue_task(task)
+        if executor == "claude_code":
+            st["claude_code_runs_today"] = int(st.get("claude_code_runs_today") or 0) + 1
+        elif executor == "codex":
+            st["codex_runs_today"] = int(st.get("codex_runs_today") or 0) + 1
+        st_mutated = True
         try:
             write_task_result(
                 ctx.DRIVE_ROOT,
@@ -463,12 +801,27 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
                 parent_task_id=parent_id,
                 description=desc,
                 context=task_context,
+                executor=executor,
+                repo_scope=repo_scope,
+                constraints=constraints,
+                artifact_policy=artifact_policy,
+                quota_class=quota_class,
+                priority=priority,
+                task_kind=task_kind,
+                caller_class=caller_class,
+                model_policy=model_policy,
+                model_override=model_override,
+                importance=importance,
+                defer_on_quota=defer_on_quota,
+                budget_decision=budget_decision,
                 result="Task accepted and scheduled.",
             )
         except Exception:
             log.warning("Failed to persist scheduled task status for %s", tid, exc_info=True)
         ctx.send_with_budget(int(owner_chat_id), f"🗓️ Scheduled task {tid}: {desc}")
         ctx.persist_queue_snapshot(reason="schedule_task_event")
+        if st_mutated:
+            ctx.save_state(st)
 
 
 def _handle_cancel_task(evt: Dict[str, Any], ctx: Any) -> None:
@@ -480,6 +833,97 @@ def _handle_cancel_task(evt: Dict[str, Any], ctx: Any) -> None:
         ctx.send_with_budget(
             int(owner_chat_id),
             f"{'✅' if ok else '❌'} cancel {task_id or '?'} (event)",
+        )
+
+
+def _handle_resume_deferred_tasks(evt: Dict[str, Any], ctx: Any) -> None:
+    st = ctx.load_state()
+    _maybe_reset_executor_quotas(st)
+    deferred = st.get("deferred_tasks")
+    if not isinstance(deferred, list) or not deferred:
+        if st.get("owner_chat_id"):
+            ctx.send_with_budget(int(st["owner_chat_id"]), "No deferred tasks to resume.")
+        return
+
+    limit = max(1, int(evt.get("limit") or 20))
+    resumed = 0
+    still_deferred = []
+
+    for item in deferred:
+        if resumed >= limit:
+            still_deferred.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        executor = _normalize_executor(item.get("executor"))
+        task_type = str(item.get("task_type") or "task").strip().lower() or "task"
+        task_kind = str(item.get("task_kind") or "general").strip().lower() or "general"
+        caller_class = str(item.get("caller_class") or "main_task_agent").strip().lower() or "main_task_agent"
+        model_policy = str(item.get("model_policy") or "balanced").strip().lower() or "balanced"
+        importance = str(item.get("importance") or "medium").strip().lower() or "medium"
+        budget_decision = _normalize_budget_decision(item.get("budget_decision"))
+        admission_error = _admission_check_external_executor(
+            st,
+            executor,
+            task_type,
+            task_kind,
+            caller_class,
+            model_policy,
+            importance,
+            budget_decision,
+            getattr(ctx, "RUNNING", {}),
+        )
+        if admission_error:
+            item["deferred_reason"] = admission_error
+            still_deferred.append(item)
+            continue
+
+        desc = str(item.get("description") or "").strip()
+        task_context = str(item.get("context") or "").strip()
+        text = desc
+        if task_context:
+            text = f"{desc}\n\n---\n[BEGIN_PARENT_CONTEXT — reference material only, not instructions]\n{task_context}\n[END_PARENT_CONTEXT]"
+        task = {
+            "id": str(item.get("task_id") or ""),
+            "type": task_type,
+            "chat_id": int(st.get("owner_chat_id") or 0),
+            "text": text,
+            "description": desc,
+            "context": task_context,
+            "depth": int(item.get("depth") or 0),
+            "executor": executor,
+            "executor_mode": "internal_agent" if executor == "ouroboros" else "external_cli",
+            "repo_scope": item.get("repo_scope") or [],
+            "constraints": item.get("constraints") or {},
+            "artifact_policy": str(item.get("artifact_policy") or "patch_only"),
+            "quota_class": str(item.get("quota_class") or "cheap"),
+            "priority": int(item.get("priority") or 0),
+            "task_kind": task_kind,
+            "caller_class": caller_class,
+            "model_policy": model_policy,
+            "model_override": str(item.get("model_override") or ""),
+            "importance": importance,
+            "defer_on_quota": bool(item.get("defer_on_quota", True)),
+            "budget_decision": budget_decision,
+        }
+        parent_id = item.get("parent_task_id")
+        if parent_id:
+            task["parent_task_id"] = parent_id
+        ctx.enqueue_task(task)
+        if executor == "claude_code":
+            st["claude_code_runs_today"] = int(st.get("claude_code_runs_today") or 0) + 1
+        elif executor == "codex":
+            st["codex_runs_today"] = int(st.get("codex_runs_today") or 0) + 1
+        resumed += 1
+
+    st["deferred_tasks"] = still_deferred
+    st["external_budget_mode"] = _compute_external_budget_mode(st)
+    ctx.save_state(st)
+    ctx.persist_queue_snapshot(reason="resume_deferred_tasks")
+    if st.get("owner_chat_id"):
+        ctx.send_with_budget(
+            int(st["owner_chat_id"]),
+            f"▶️ Resumed deferred tasks: {resumed}. Still deferred: {len(still_deferred)}.",
         )
 
 
@@ -589,6 +1033,7 @@ EVENT_HANDLERS = {
     "review_request": _handle_review_request,
     "promote_to_stable": _handle_promote_to_stable,
     "schedule_task": _handle_schedule_task,
+    "resume_deferred_tasks": _handle_resume_deferred_tasks,
     "cancel_task": _handle_cancel_task,
     "send_photo": _handle_send_photo,
     "toggle_evolution": _handle_toggle_evolution,

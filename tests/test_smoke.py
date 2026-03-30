@@ -89,6 +89,7 @@ EXPECTED_TOOLS = [
     "data_read", "data_write", "data_list",
     "git_status", "git_diff",
     "pull_from_remote", "restore_to_head", "revert_commit",
+    "apply_task_patch", "discard_task_patch", "validate_executor_result",
     "run_shell", "claude_code_edit",
     "browse_page", "browser_action",
     "web_search",
@@ -107,7 +108,7 @@ EXPECTED_TOOLS = [
     "close_github_issue", "create_github_issue",
     "summarize_dialogue",
     # Task decomposition
-    "get_task_result", "wait_for_task",
+    "get_task_result", "wait_for_task", "resume_deferred_tasks",
     "generate_evolution_stats",
     # VLM / Vision
     "analyze_screenshot", "vlm_query",

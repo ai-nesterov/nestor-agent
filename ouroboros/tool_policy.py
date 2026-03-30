@@ -21,7 +21,8 @@ CORE_TOOL_NAMES = frozenset({
     "git_status", "git_diff",
     "restore_to_head", "revert_commit",
     "pull_from_remote",
-    "schedule_task", "wait_for_task", "get_task_result",
+    "schedule_task", "wait_for_task", "get_task_result", "resume_deferred_tasks",
+    "validate_executor_result", "apply_task_patch", "discard_task_patch",
     "update_scratchpad", "update_identity",
     "chat_history", "web_search",
     "send_user_message", "send_photo", "switch_model",
@@ -31,6 +32,54 @@ CORE_TOOL_NAMES = frozenset({
 })
 
 META_TOOL_NAMES = frozenset({"list_available_tools", "enable_tools"})
+
+
+def recommend_executor(
+    *,
+    task_type: str = "task",
+    analysis_only: bool = False,
+    implementation_heavy: bool = False,
+    architecture_heavy: bool = False,
+    deterministic_output_required: bool = False,
+) -> str:
+    """Heuristic recommendation for schedule_task(executor=...).
+
+    v1 routing rubric:
+    - ouroboros: planning, review, analysis, small/general tasks
+    - claude_code: architecture-heavy multi-file refactors
+    - codex: deterministic implementation-heavy tasks
+    """
+
+    tt = str(task_type or "task").strip().lower()
+    if tt in {"review", "consciousness"}:
+        return "ouroboros"
+    if analysis_only:
+        return "ouroboros"
+    if architecture_heavy:
+        return "claude_code"
+    if implementation_heavy and deterministic_output_required:
+        return "codex"
+    return "ouroboros"
+
+
+def caller_can_schedule_external_executor(
+    *,
+    caller_class: str,
+    task_type: str = "task",
+    allow_evolution: bool = False,
+    allow_consciousness: bool = False,
+) -> bool:
+    """Return whether external executors are allowed for this caller/task class."""
+
+    cc = str(caller_class or "").strip().lower()
+    tt = str(task_type or "task").strip().lower()
+    if cc == "consciousness":
+        return bool(allow_consciousness)
+    if tt == "evolution":
+        return bool(allow_evolution)
+    if cc == "review":
+        return False
+    return cc in {"main_task_agent", "human_invoked", "task_agent", ""}
 
 
 class ToolSchemaProvider(Protocol):
