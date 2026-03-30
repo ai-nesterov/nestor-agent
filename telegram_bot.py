@@ -194,9 +194,9 @@ async def cmd_panic(message: Message):
     """Handle /panic command"""
     await _forward_to_server(message, "/panic")
 
-@dp.message(F.text & ~Command())
+@dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text(message: Message):
-    """Handle regular text messages"""
+    """Handle regular text messages (not commands)"""
     if not message.text:
         return
     
