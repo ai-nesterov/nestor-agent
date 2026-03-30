@@ -403,6 +403,13 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         ctx.RUNNING.pop(str(task_id), None)
     if wid in ctx.WORKERS and ctx.WORKERS[wid].busy_task_id == task_id:
         ctx.WORKERS[wid].busy_task_id = None
+    elif task_id:
+        # Backward-compatible fallback for older events without worker_id:
+        # release whichever worker still points to this task id.
+        for w in ctx.WORKERS.values():
+            if getattr(w, "busy_task_id", None) == task_id:
+                w.busy_task_id = None
+                break
     ctx.persist_queue_snapshot(reason="task_done")
     try:
         ctx.bridge.push_log({

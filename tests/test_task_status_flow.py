@@ -280,3 +280,43 @@ def test_handle_log_event_does_not_persist_non_transition(tmp_path):
 
     events_path = tmp_path / "logs" / "events.jsonl"
     assert not events_path.exists()
+
+
+def test_handle_task_done_clears_worker_busy_without_worker_id(tmp_path):
+    from supervisor import events as ev_module
+
+    class _Worker:
+        def __init__(self, busy_task_id):
+            self.busy_task_id = busy_task_id
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        RUNNING = {"t-orphan": {"task": {"id": "t-orphan"}, "worker_id": 1}}
+        WORKERS = {1: _Worker("t-orphan")}
+        bridge = _Bridge()
+
+        def load_state(self):
+            return {}
+
+        def save_state(self, st):
+            return None
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_task_done(
+        {"type": "task_done", "task_id": "t-orphan", "task_type": "task"},
+        _Ctx(),
+    )
+
+    assert "t-orphan" not in _Ctx.RUNNING
+    assert _Ctx.WORKERS[1].busy_task_id is None

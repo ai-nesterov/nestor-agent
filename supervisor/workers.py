@@ -553,6 +553,7 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
         out_q.put(
             {
                 "type": "task_metrics",
+                "worker_id": wid,
                 "task_id": task_id,
                 "task_type": task.get("type"),
                 "duration_sec": duration_sec,
@@ -568,6 +569,7 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
         out_q.put(
             {
                 "type": "task_done",
+                "worker_id": wid,
                 "task_id": task_id,
                 "task_type": task.get("type"),
                 "cost_usd": round(float(cost_usd or 0.0), 6),
@@ -581,6 +583,7 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
         out_q.put(
             {
                 "type": "log_event",
+                "worker_id": wid,
                 "data": {
                     "type": "executor_result",
                     "ts": finished_iso,
