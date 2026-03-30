@@ -97,6 +97,7 @@ SETTINGS_DEFAULTS = {
     "TELEGRAM_WEBHOOK_URL": "",
     "TELEGRAM_INTERNAL_SECRET": "",
     "TELEGRAM_BOT_PORT": 8767,
+    "TELEGRAM_ADMIN_CHAT_IDS": [],
     # Local model (llama-cpp-python server)
     "LOCAL_MODEL_SOURCE": "",
     "LOCAL_MODEL_FILENAME": "",

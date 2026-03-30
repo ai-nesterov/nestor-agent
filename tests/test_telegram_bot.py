@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, Chat, User
@@ -43,6 +44,10 @@ from telegram_bot import (
     cmd_panic,
     handle_text,
     _forward_to_server,
+    get_http_client,
+    close_http_client,
+    redact_sensitive,
+    get_authorized_chat_ids,
 )
 
 # pytest-asyncio configured via @pytest.mark.asyncio on individual async tests
@@ -301,6 +306,23 @@ class TestLoggingMiddleware:
         
         telegram_bot.TELEGRAM_LOG_PATH = original_path
 
+    @pytest.mark.asyncio
+    async def test_middleware_handles_missing_from_user(self):
+        """Channel posts must not crash logging when from_user is missing."""
+        middleware = LoggingMiddleware()
+        message = MagicMock(spec=Message)
+        message.text = "channel update"
+        message.chat = MagicMock(spec=Chat)
+        message.chat.id = -100123
+        message.message_id = 55
+        message.from_user = None
+        handler = AsyncMock(return_value="ok")
+
+        result = await middleware(handler, message, {})
+
+        assert result == "ok"
+        handler.assert_awaited_once()
+
 
 # ============================================================================
 # Integration Tests
@@ -334,6 +356,19 @@ class TestIntegration:
         assert SERVER_API_URL == "http://127.0.0.1:8765/api/telegram/process-message"
         assert SERVER_API_URL.startswith("http://")
         assert "api/telegram/process-message" in SERVER_API_URL
+
+    @pytest.mark.asyncio
+    async def test_http_client_is_reused(self):
+        """HTTP client should be shared across requests for pooling."""
+        telegram_bot._http_client = None
+
+        client1 = await get_http_client()
+        client2 = await get_http_client()
+
+        assert client1 is client2
+
+        await close_http_client()
+        assert telegram_bot._http_client is None
 
 
 # ============================================================================
@@ -422,6 +457,95 @@ class TestRegression:
                 
             finally:
                 telegram_bot.SETTINGS_PATH = original_settings_path
+
+    def test_redact_sensitive_hides_configured_secrets(self, monkeypatch):
+        """Log redaction should remove bot token and internal secret."""
+        monkeypatch.setattr(telegram_bot, "TELEGRAM_BOT_TOKEN", "bot-secret")
+        monkeypatch.setattr(telegram_bot, "TELEGRAM_INTERNAL_SECRET", "internal-secret")
+
+        redacted = redact_sensitive("bot-secret and internal-secret visible")
+
+        assert "bot-secret" not in redacted
+        assert "internal-secret" not in redacted
+        assert redacted.count("[REDACTED]") == 2
+
+    def test_get_authorized_chat_ids_includes_owner_fallback(self, monkeypatch):
+        """owner_chat_id from state should augment TELEGRAM_ADMIN_CHAT_IDS."""
+        monkeypatch.setattr(telegram_bot, "TELEGRAM_ADMIN_CHAT_IDS", "111,222")
+        monkeypatch.setattr(telegram_bot, "_load_owner_chat_id", lambda: 333)
+
+        assert get_authorized_chat_ids() == {111, 222, 333}
+
+    @pytest.mark.asyncio
+    async def test_privileged_command_requires_authorized_chat(self, mock_message, monkeypatch):
+        """Restricted commands must reject unauthorized chats."""
+        mock_message.answer = AsyncMock()
+        monkeypatch.setattr(telegram_bot, "is_authorized_chat", lambda chat_id: False)
+        forward_mock = AsyncMock()
+        monkeypatch.setattr(telegram_bot, "_forward_to_server", forward_mock)
+
+        await cmd_panic(mock_message)
+
+        forward_mock.assert_not_awaited()
+        mock_message.answer.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_privileged_command_allows_authorized_chat(self, mock_message, monkeypatch):
+        """Restricted commands must pass through for authorized chats."""
+        monkeypatch.setattr(telegram_bot, "is_authorized_chat", lambda chat_id: True)
+        forward_mock = AsyncMock()
+        monkeypatch.setattr(telegram_bot, "_forward_to_server", forward_mock)
+        mock_message.text = "/restart"
+
+        await cmd_restart(mock_message)
+
+        forward_mock.assert_awaited_once_with(mock_message, "/restart")
+
+    @pytest.mark.asyncio
+    async def test_forward_to_server_handles_missing_from_user(self, mock_message, monkeypatch, mock_server_response):
+        """Channel posts should serialize a null user block instead of crashing."""
+        mock_message.from_user = None
+        processing_msg = AsyncMock()
+        processing_msg.message_id = 333
+        mock_message.answer = AsyncMock(return_value=processing_msg)
+        client = AsyncMock()
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = mock_server_response
+        client.post = AsyncMock(return_value=response)
+        monkeypatch.setattr(telegram_bot, "get_http_client", AsyncMock(return_value=client))
+        delete_mock = AsyncMock()
+        monkeypatch.setattr(telegram_bot.bot, "delete_message", delete_mock)
+
+        await _forward_to_server(mock_message, "hello")
+
+        payload = client.post.await_args.kwargs["json"]
+        assert payload["from_user"] == {"id": None, "username": None, "first_name": None}
+        delete_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_forward_to_server_retries_on_500(self, mock_message, monkeypatch, mock_server_response):
+        """Transient 500s should be retried before succeeding."""
+        processing_msg = AsyncMock()
+        processing_msg.message_id = 444
+        mock_message.answer = AsyncMock(return_value=processing_msg)
+        request = httpx.Request("POST", SERVER_API_URL)
+        failure_response = httpx.Response(500, request=request)
+        failure = httpx.HTTPStatusError("boom", request=request, response=failure_response)
+        success_response = MagicMock()
+        success_response.raise_for_status = MagicMock()
+        success_response.json.return_value = mock_server_response
+        client = AsyncMock()
+        client.post = AsyncMock(side_effect=[failure, success_response])
+        monkeypatch.setattr(telegram_bot, "get_http_client", AsyncMock(return_value=client))
+        monkeypatch.setattr(telegram_bot.bot, "delete_message", AsyncMock())
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr(telegram_bot.asyncio, "sleep", sleep_mock)
+
+        await _forward_to_server(mock_message, "hello")
+
+        assert client.post.await_count == 2
+        sleep_mock.assert_awaited_once()
 
 
 # ============================================================================
