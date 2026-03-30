@@ -24,7 +24,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from supervisor.state import load_state, append_jsonl
 from supervisor import git_ops
 from supervisor.message_bus import send_with_budget
-from ouroboros.task_results import STATUS_COMPLETED, STATUS_FAILED, write_task_result
+from ouroboros.task_results import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_RUNNING,
+    load_task_result,
+    write_task_result,
+)
 from ouroboros.utils import utc_now_iso
 
 
@@ -293,6 +299,74 @@ def auto_resume_after_restart() -> None:
         })
 
 
+def _record_external_task_running(
+    *,
+    drive_root: Union[pathlib.Path, str],
+    task: Dict[str, Any],
+    executor: str,
+    started_iso: str,
+    out_q: Any,
+) -> None:
+    task_id = str(task.get("id") or "")
+    if not task_id:
+        return
+    root = pathlib.Path(drive_root)
+    previous_status = "scheduled"
+    try:
+        existing = load_task_result(root, task_id)
+        if isinstance(existing, dict):
+            prev = str(existing.get("status") or "").strip().lower()
+            if prev:
+                previous_status = prev
+    except Exception:
+        pass
+
+    try:
+        write_task_result(
+            root,
+            task_id,
+            STATUS_RUNNING,
+            parent_task_id=task.get("parent_task_id"),
+            description=task.get("description"),
+            context=task.get("context"),
+            executor=executor,
+            repo_scope=task.get("repo_scope") or [],
+            constraints=task.get("constraints") or {},
+            artifact_policy=task.get("artifact_policy"),
+            quota_class=task.get("quota_class"),
+            priority=task.get("priority"),
+            task_type=task.get("type"),
+            task_kind=task.get("task_kind"),
+            caller_class=task.get("caller_class"),
+            model_policy=task.get("model_policy"),
+            model_override=task.get("model_override"),
+            importance=task.get("importance"),
+            defer_on_quota=bool(task.get("defer_on_quota", True)),
+            budget_decision=task.get("budget_decision"),
+            result=f"External executor '{executor}' is running.",
+            trace_summary=f"external_executor={executor}; status=running",
+            cost_usd=0.0,
+            total_rounds=0,
+            ts=started_iso,
+        )
+    except Exception:
+        log.warning("Failed to persist running task status for %s", task_id, exc_info=True)
+
+    out_q.put(
+        {
+            "type": "log_event",
+            "data": {
+                "type": "status_transition",
+                "ts": started_iso,
+                "task_id": task_id,
+                "executor": executor,
+                "from_status": previous_status,
+                "to_status": "running",
+            },
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Worker process
 # ---------------------------------------------------------------------------
@@ -311,6 +385,15 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
         _log_worker_crash(wid, _drive, "make_agent", _e, _tb.format_exc())
         return
 
+    def _mark_external_task_running(task: Dict[str, Any], executor: str, started_iso: str) -> None:
+        _record_external_task_running(
+            drive_root=drive_root,
+            task=task,
+            executor=executor,
+            started_iso=started_iso,
+            out_q=out_q,
+        )
+
     def _run_external_task(task: Dict[str, Any], executor: str) -> None:
         started_at = time.time()
         started_iso = utc_now_iso()
@@ -326,6 +409,7 @@ def worker_main(wid: int, in_q: Any, out_q: Any, repo_dir: str, drive_root: str)
         cost_usd = 0.0
         total_rounds = 1
 
+        _mark_external_task_running(task, executor, started_iso)
         out_q.put({
             "type": "log_event",
             "data": {

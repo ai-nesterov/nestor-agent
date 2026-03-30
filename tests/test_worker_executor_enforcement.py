@@ -23,6 +23,41 @@ def _init_state(tmp_path, owner_chat_id=1):
     st_module.save_state(st)
 
 
+def test_record_external_task_running_writes_status_and_transition_event(tmp_path):
+    from supervisor import workers
+    from ouroboros.task_results import STATUS_REQUESTED, load_task_result, write_task_result
+
+    task_id = "ext-running-01"
+    write_task_result(
+        tmp_path,
+        task_id,
+        STATUS_REQUESTED,
+        description="External task",
+        executor="codex",
+        result="Task request queued.",
+    )
+
+    q = _DummyQueue()
+    workers._record_external_task_running(
+        drive_root=tmp_path,
+        task={"id": task_id, "description": "External task", "executor": "codex"},
+        executor="codex",
+        started_iso="2026-03-30T00:00:00+00:00",
+        out_q=q,
+    )
+
+    payload = load_task_result(tmp_path, task_id)
+    assert payload and payload.get("status") == "running"
+    assert "is running" in str(payload.get("result") or "")
+
+    assert len(q.items) == 1
+    evt = q.items[0]
+    assert evt.get("type") == "log_event"
+    assert evt.get("data", {}).get("type") == "status_transition"
+    assert evt.get("data", {}).get("from_status") == "requested"
+    assert evt.get("data", {}).get("to_status") == "running"
+
+
 def test_assign_tasks_rejects_unroutable_external_executor(tmp_path, monkeypatch):
     from supervisor import workers
     from supervisor import queue as q_module

@@ -1030,6 +1030,11 @@ def _handle_log_event(evt: Dict[str, Any], ctx: Any) -> None:
         "ts": data.get("ts", datetime.datetime.now(datetime.timezone.utc).isoformat()),
         **data,
     }
+    if str(payload.get("type") or "") == "status_transition":
+        try:
+            ctx.append_jsonl(ctx.DRIVE_ROOT / "logs" / "events.jsonl", payload)
+        except Exception:
+            log.warning("Failed to persist status_transition event", exc_info=True)
     try:
         ctx.bridge.push_log(payload)
     except Exception:

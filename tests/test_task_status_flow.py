@@ -207,3 +207,76 @@ def test_handle_text_response_keeps_full_reasoning_note():
     _, _, updated = _handle_text_response(content, llm_trace, {})
 
     assert updated["reasoning_notes"] == [content]
+
+
+def test_handle_log_event_persists_status_transition(tmp_path):
+    from supervisor import events as ev_module
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        bridge = _Bridge()
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_log_event(
+        {
+            "type": "log_event",
+            "data": {
+                "type": "status_transition",
+                "ts": "2026-03-30T00:00:00+00:00",
+                "task_id": "task-1",
+                "executor": "codex",
+                "from_status": "scheduled",
+                "to_status": "running",
+            },
+        },
+        _Ctx(),
+    )
+
+    events_path = tmp_path / "logs" / "events.jsonl"
+    lines = [ln.strip() for ln in events_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["type"] == "status_transition"
+    assert payload["to_status"] == "running"
+
+
+def test_handle_log_event_does_not_persist_non_transition(tmp_path):
+    from supervisor import events as ev_module
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        bridge = _Bridge()
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_log_event(
+        {
+            "type": "log_event",
+            "data": {
+                "type": "executor_run",
+                "ts": "2026-03-30T00:00:01+00:00",
+                "task_id": "task-2",
+                "executor": "claude_code",
+                "status": "running",
+            },
+        },
+        _Ctx(),
+    )
+
+    events_path = tmp_path / "logs" / "events.jsonl"
+    assert not events_path.exists()
