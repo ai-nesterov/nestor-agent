@@ -42,6 +42,22 @@ def test_worktree_prepare_collect_and_cleanup(tmp_path):
     assert not handle.path.exists()
 
 
+def test_collect_patch_includes_untracked_files(tmp_path):
+    repo = _init_repo(tmp_path)
+    manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
+
+    handle = manager.prepare_worktree(task_id="t-untracked", base_branch="ouroboros", executor="codex")
+    (handle.path / "new_file.txt").write_text("hello\n", encoding="utf-8")
+
+    patch_path = manager.collect_patch(handle, tmp_path / "artifacts")
+    patch = patch_path.read_text(encoding="utf-8")
+
+    assert "new_file.txt" in patch
+    assert "+hello" in patch
+
+    manager.cleanup_worktree(handle)
+
+
 def test_parallel_worktrees_do_not_conflict(tmp_path):
     repo = _init_repo(tmp_path)
     manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
@@ -62,6 +78,20 @@ def test_protected_paths_guard_detects_changes(tmp_path):
 
     handle = manager.prepare_worktree(task_id="guard1", base_branch="ouroboros", executor="codex")
     (handle.path / "BIBLE.md").write_text("tampered\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        manager.assert_protected_paths_clean(handle)
+
+    manager.cleanup_worktree(handle)
+
+
+def test_protected_paths_guard_detects_untracked_changes(tmp_path):
+    repo = _init_repo(tmp_path)
+    manager = WorktreeManager(repo, branch_dev="ouroboros", worktrees_root=tmp_path / "worktrees")
+
+    handle = manager.prepare_worktree(task_id="guard2", base_branch="ouroboros", executor="codex")
+    (handle.path / "prompts").mkdir(parents=True, exist_ok=True)
+    (handle.path / "prompts/SAFETY.md").write_text("tampered\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError):
         manager.assert_protected_paths_clean(handle)

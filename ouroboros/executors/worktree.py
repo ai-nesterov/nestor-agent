@@ -43,6 +43,21 @@ class WorktreeManager:
         )
         return proc.stdout.strip()
 
+    def _prime_index_for_untracked(self, cwd: Path) -> None:
+        # Intent-to-add makes untracked files visible to `git diff` without commit.
+        subprocess.run(
+            ["git", "add", "-N", "--all"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _changed_paths_including_untracked(self, cwd: Path) -> list[str]:
+        self._prime_index_for_untracked(cwd)
+        changed = self._git("diff", "--name-only", cwd=cwd).splitlines()
+        return [p.strip() for p in changed if p.strip()]
+
     def prepare_worktree(self, task_id: str, base_branch: str | None, executor: str) -> WorktreeHandle:
         safe_task = str(task_id).strip()
         safe_executor = str(executor).strip().lower()
@@ -85,6 +100,7 @@ class WorktreeManager:
     def collect_patch(self, handle: WorktreeHandle, artifact_dir: Path) -> Path:
         artifact_dir = Path(artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)
+        self._prime_index_for_untracked(handle.path)
 
         diff_proc = subprocess.run(
             ["git", "diff", "--binary"],
@@ -96,9 +112,9 @@ class WorktreeManager:
         patch_path = artifact_dir / "patch.diff"
         patch_path.write_text(diff_proc.stdout, encoding="utf-8")
 
-        changed_files = self._git("diff", "--name-only", cwd=handle.path).splitlines()
+        changed_files = self._changed_paths_including_untracked(handle.path)
         (artifact_dir / "changed_files.json").write_text(
-            json.dumps([f for f in changed_files if f], ensure_ascii=False, indent=2),
+            json.dumps(changed_files, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -127,8 +143,7 @@ class WorktreeManager:
         return patch_path
 
     def assert_protected_paths_clean(self, handle: WorktreeHandle) -> None:
-        changed = self._git("diff", "--name-only", cwd=handle.path).splitlines()
-        changed_set = {p.strip() for p in changed if p.strip()}
+        changed_set = set(self._changed_paths_including_untracked(handle.path))
         touched = sorted(self.protected_paths.intersection(changed_set))
         if touched:
             raise RuntimeError(f"Protected paths changed in worktree: {', '.join(touched)}")

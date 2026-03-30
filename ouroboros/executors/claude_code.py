@@ -115,6 +115,13 @@ class ClaudeCodeRunner:
         return proc.stdout.strip()
 
     def _collect_diff(self, work_dir: Path) -> tuple[List[str], Dict[str, int]]:
+        subprocess.run(
+            ["git", "add", "-N", "--all"],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         changed = [x for x in self._git(work_dir, "diff", "--name-only").splitlines() if x.strip()]
         numstat = self._git(work_dir, "diff", "--numstat")
         files = 0
