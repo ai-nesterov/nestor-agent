@@ -25,6 +25,7 @@ from aiogram.types import Message
 # Paths and config
 # ---------------------------------------------------------------------------
 DATA_DIR = Path(os.environ.get("OUROBOROS_DATA_DIR", Path.home() / "Ouroboros" / "data"))
+SETTINGS_PATH = DATA_DIR / "settings.json"
 TELEGRAM_LOG_PATH = DATA_DIR / "logs" / "telegram.jsonl"
 
 # Ensure log directory exists
@@ -41,10 +42,26 @@ logging.basicConfig(
 )
 log = logging.getLogger("telegram_bot")
 
-# Config from environment
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_BOT_ENABLED = os.environ.get("TELEGRAM_BOT_ENABLED", "false").lower() in ("true", "1", "yes", "yes")
-TELEGRAM_INTERNAL_SECRET = os.environ.get("TELEGRAM_INTERNAL_SECRET", "")
+# Load settings from settings.json (same as server.py)
+def load_settings():
+    """Load settings from settings.json file"""
+    if not SETTINGS_PATH.exists():
+        log.error("Settings file not found: %s", SETTINGS_PATH)
+        return {}
+    
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log.error("Failed to load settings: %s", e)
+        return {}
+
+_settings = load_settings()
+
+# Config from settings.json (with env override for launcher-managed runs)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", _settings.get("TELEGRAM_BOT_TOKEN", ""))
+TELEGRAM_BOT_ENABLED = os.environ.get("TELEGRAM_BOT_ENABLED", str(_settings.get("TELEGRAM_BOT_ENABLED", False))).lower() in ("true", "1", "yes", "yes")
+TELEGRAM_INTERNAL_SECRET = os.environ.get("TELEGRAM_INTERNAL_SECRET", _settings.get("TELEGRAM_INTERNAL_SECRET", ""))
 
 SERVER_API_URL = f"http://127.0.0.1:8765/api/telegram/process-message"
 
