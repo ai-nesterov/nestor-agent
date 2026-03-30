@@ -111,7 +111,7 @@ async def get_http_client():
 class LoggingMiddleware:
     """Log all incoming messages to telegram.jsonl"""
     
-    async def __call__(self, handler, event):
+    async def __call__(self, handler, event, data):
         start_time = time.time()
         
         # Log incoming message
@@ -126,7 +126,7 @@ class LoggingMiddleware:
             }
             self._write_log(log_entry)
         
-        result = await handler(event)
+        result = await handler(event, data)
         duration = time.time() - start_time
         
         log.debug("Handler completed in %.2fms", duration * 1000)

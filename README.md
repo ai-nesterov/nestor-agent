@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.6.4](https://img.shields.io/badge/version-4.6.4-green.svg)](VERSION)
+[![Version 4.6.5](https://img.shields.io/badge/version-4.6.5-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -247,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.6.5 | 2026-03-30 | Fix LoggingMiddleware signature for aiogram 3.x compatibility: middleware __call__ must accept (handler, event, data) instead of (handler, event). Resolves TypeError when bot processes messages.
 | 4.6.4 | 2026-03-30 | Add comprehensive test suite for telegram_bot.py (30+ tests): configuration loading, handler registration, middleware logging, integration tests, and regression tests for known bugs (Command() filter, import errors). Added pytest-asyncio dependency. Tests prevent future regressions. |
 | 4.6.3 | 2026-03-30 | Fix telegram_bot.py startup crash: `Command()` without arguments raises ValueError in aiogram 3.x. Replaced `~Command()` with `~F.text.startswith("/")` to filter slash commands properly. Bot now starts successfully. |
 | 4.6.2 | 2026-03-30 | Fix telegram_bot.py to auto-generate TELEGRAM_INTERNAL_SECRET if missing (instead of exiting with error). Bot now reads settings.json directly and saves generated secret back to file. Resolves "TELEGRAM_INTERNAL_SECRET not configured" error on standalone launch. |
