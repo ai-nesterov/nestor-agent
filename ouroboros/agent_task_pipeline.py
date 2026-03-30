@@ -92,27 +92,24 @@ def emit_task_results(
     """Emit all end-of-task events to supervisor and run post-task processing."""
     task_type = str(task.get("type") or "").lower()
     
-    # Special handling for Telegram messages
-    if task_type == "telegram_message":
-        telegram_chat_id = task.get("chat_id")
-        if telegram_chat_id:
-            try:
-                from ouroboros.tools.telegram import telegram_send_message
-                # Truncate very long responses for Telegram (4096 char limit)
-                truncated_text = (text or "\u200b")[:4090] + "..." if len(text or "") > 4090 else (text or "\u200b")
-                telegram_send_message(str(telegram_chat_id), truncated_text)
-                log.info("Telegram response sent to chat %s", telegram_chat_id)
-            except Exception as e:
-                log.error("Failed to send Telegram response: %s", e, exc_info=True)
-                # Fallback: still emit event for logging
-                pending_events.append({
-                    "type": "send_message", "chat_id": task.get("chat_id"),
-                    "text": f"[Telegram send failed: {e}] {text or ''}",
-                    "log_text": text or "", "format": "markdown",
-                    "task_id": task.get("id"), "ts": utc_now_iso(),
-                })
-        else:
-            log.warning("Telegram message task missing chat_id")
+    # Special handling for Telegram messages (check for _telegram_chat_id marker)
+    telegram_chat_id = task.get("_telegram_chat_id")
+    if telegram_chat_id:
+        try:
+            from ouroboros.tools.telegram import telegram_send_message
+            # Truncate very long responses for Telegram (4096 char limit)
+            truncated_text = (text or "\u200b")[:4090] + "..." if len(text or "") > 4090 else (text or "\u200b")
+            telegram_send_message(str(telegram_chat_id), truncated_text)
+            log.info("Telegram response sent to chat %s", telegram_chat_id)
+        except Exception as e:
+            log.error("Failed to send Telegram response: %s", e, exc_info=True)
+            # Fallback: still emit event for logging
+            pending_events.append({
+                "type": "send_message", "chat_id": task.get("chat_id"),
+                "text": f"[Telegram send failed: {e}] {text or ''}",
+                "log_text": text or "", "format": "markdown",
+                "task_id": task.get("id"), "ts": utc_now_iso(),
+            })
     else:
         # Regular chat message
         pending_events.append({

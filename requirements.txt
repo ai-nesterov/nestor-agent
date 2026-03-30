@@ -10,3 +10,8 @@ playwright
 playwright-stealth
 # optional: local model server (requires Metal-enabled build on macOS)
 # CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python[server]
+# optional: telegram bot
+aiogram>=3.0.0
+httpx
+# testing
+pytest-asyncio

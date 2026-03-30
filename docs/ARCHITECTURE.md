@@ -1,4 +1,4 @@
-# Ouroboros v4.5.1 — Architecture & Reference
+# Ouroboros v4.6.4 — Architecture & Reference
 
 This document describes every component, page, button, API endpoint, and data flow.
 It is the single source of truth for how the system works. Keep it updated.
@@ -57,15 +57,15 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
       └── compat.py            ← Cross-platform process/path/locking helpers
 ```
 
-### Two-process model
+### Two-process model (plus Telegram bot)
 
 1. **launcher.py** — immutable outer shell (lives inside the `.app` bundle, not in the git repo). Never self-modifies. Handles:
    - PID lock (single instance)
    - Bootstrap: copies workspace to `~/Ouroboros/repo/` on first run
    - Core file sync: overwrites safety-critical files on every launch
-   - Starts `server.py` as a subprocess via embedded Python
+   - Starts `server.py` and optionally `telegram_bot.py` as subprocesses
    - Shows PyWebView window pointed at `http://127.0.0.1:8765`
-   - Monitors subprocess; restarts on exit code 42 (restart signal)
+   - Monitors subprocesses; restarts on exit code 42 (restart signal)
    - First-run wizard (PyWebView HTML page for API key entry)
    - **Graceful shutdown with orphan cleanup** (see Shutdown section below)
 
@@ -74,6 +74,14 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
    - Runs supervisor in a background thread
    - Supervisor manages worker pool, task queue, message routing
    - Local model lifecycle endpoints extracted to `ouroboros/local_model_api.py`
+
+3. **telegram_bot.py** — standalone aiogram 3.x Telegram bot process (optional).
+   - Uses aiogram polling (no webhook server needed)
+   - Communicates with `server.py` via HTTP API (`/api/telegram/process-message`)
+   - Authenticated via `TELEGRAM_INTERNAL_SECRET` header
+   - Handles Telegram updates, slash commands, text messages
+   - Forwards messages to agent via message bus, receives responses
+   - Managed by launcher.py (started/stopped based on `TELEGRAM_BOT_ENABLED`)
 
 ### Data layout (`~/Ouroboros/`)
 
@@ -299,7 +307,8 @@ Navigation is a left sidebar with 8 pages.
 | GET | `/api/evolution-data` | Evolution metrics per git tag (LOC, prompt sizes, memory) |
 | GET | `/api/chat/history` | Merged chat + system summaries + progress messages (chronological, limit param) |
 | POST | `/api/local-model/test` | Local model sanity test (chat + tool calling) |
-| POST | `/api/telegram/webhook` | Telegram Bot API webhook: receives updates, routes to message_bus as `telegram_message` tasks |
+| POST | `/api/telegram/webhook` | Telegram Bot API webhook (legacy): receives updates, routes to message_bus |
+| POST | `/api/telegram/process-message` | Internal API for telegram_bot.py: authenticated message processing |
 | WS | `/ws` | WebSocket: chat messages, commands, log streaming |
 | GET | `/static/*` | Static files from `web/` directory (NoCacheStaticFiles wrapper forces revalidation) |
 

@@ -884,7 +884,7 @@ from ouroboros.local_model_api import (
 
 
 async def api_telegram_webhook(request: Request) -> JSONResponse:
-    """Telegram webhook endpoint — receives updates from Telegram Bot API."""
+    """Telegram webhook endpoint — receives updates from Telegram Bot API (legacy)."""
     try:
         update = await request.json()
     except Exception:
@@ -932,6 +932,61 @@ async def api_telegram_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
+async def api_telegram_process_message(request: Request) -> JSONResponse:
+    """Internal API for telegram_bot.py to send messages for processing.
+    
+    This endpoint receives messages from the standalone aiogram bot process
+    and routes them to the agent for LLM processing.
+    """
+    # Verify internal secret
+    secret = request.headers.get("X-Telegram-Secret")
+    expected_secret = os.environ.get("TELEGRAM_INTERNAL_SECRET", "")
+    
+    if not expected_secret:
+        log.warning("Telegram internal secret not configured")
+        return JSONResponse({"status": "error", "message": "Internal secret not configured"}, status_code=500)
+    
+    if secret != expected_secret:
+        log.warning("Invalid Telegram internal secret")
+        return JSONResponse({"status": "error", "message": "Invalid secret"}, status_code=401)
+    
+    try:
+        payload = await request.json()
+    except Exception:
+        log.warning("Failed to parse Telegram process-message JSON")
+        return JSONResponse({"status": "error", "message": "Invalid JSON"}, status_code=400)
+    
+    chat_id = payload.get("chat_id")
+    text = payload.get("text")
+    message_id = payload.get("message_id")
+    
+    if not chat_id or not text:
+        log.warning("Invalid payload from telegram_bot: %s", payload.keys())
+        return JSONResponse({"status": "error", "message": "Missing chat_id or text"}, status_code=400)
+    
+    log.info("Telegram process-message from chat %s: %s", chat_id, text[:100])
+    
+    # Route to message bus
+    try:
+        from supervisor.message_bus import LocalChatBridge
+        bridge = LocalChatBridge()
+        
+        task_data = {
+            "type": "telegram_message",
+            "chat_id": chat_id,
+            "text": text,
+            "msg_id": message_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        bridge.push_message(task_data)
+        
+        return JSONResponse({"status": "success", "message": "Message queued for processing"})
+    except Exception as e:
+        log.error("Failed to route Telegram message from bot: %s", e, exc_info=True)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
@@ -974,6 +1029,7 @@ routes = [
     Route("/api/local-model/status", endpoint=api_local_model_status),
     Route("/api/local-model/test", endpoint=api_local_model_test, methods=["POST"]),
     Route("/api/telegram/webhook", endpoint=api_telegram_webhook, methods=["POST"]),
+    Route("/api/telegram/process-message", endpoint=api_telegram_process_message, methods=["POST"]),
     WebSocketRoute("/ws", endpoint=ws_endpoint),
     Mount("/static", app=NoCacheStaticFiles(directory=str(web_dir)), name="static"),
 ]
