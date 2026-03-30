@@ -92,6 +92,7 @@ class Worker:
     proc: mp.Process
     in_q: Any
     busy_task_id: Optional[str] = None
+    kind: str = "ouroboros"
 
 
 _EVENT_Q = None
@@ -559,7 +560,7 @@ def respawn_worker(wid: int) -> None:
                        args=(wid, in_q, get_event_q(), str(REPO_DIR), str(DRIVE_ROOT)))
     proc.daemon = True
     proc.start()
-    WORKERS[wid] = Worker(wid=wid, proc=proc, in_q=in_q, busy_task_id=None)
+    WORKERS[wid] = Worker(wid=wid, proc=proc, in_q=in_q, busy_task_id=None, kind="ouroboros")
     # Give freshly respawned workers the same init grace as startup workers.
     _LAST_SPAWN_TIME = time.time()
 
@@ -567,6 +568,41 @@ def respawn_worker(wid: int) -> None:
 def assign_tasks() -> None:
     from supervisor import queue
     from supervisor.state import budget_remaining, EVOLUTION_BUDGET_RESERVE
+
+    def _task_executor(task: Dict[str, Any]) -> str:
+        return str(task.get("executor") or "ouroboros").strip().lower() or "ouroboros"
+
+    def _worker_supports_task(worker: Worker, task: Dict[str, Any]) -> bool:
+        return str(getattr(worker, "kind", "ouroboros") or "ouroboros").strip().lower() == _task_executor(task)
+
+    def _fail_unroutable_task(task: Dict[str, Any], reason: str) -> None:
+        task_id = str(task.get("id") or "")
+        try:
+            from ouroboros.task_results import STATUS_FAILED, write_task_result
+            write_task_result(
+                DRIVE_ROOT,
+                task_id,
+                STATUS_FAILED,
+                parent_task_id=task.get("parent_task_id"),
+                description=task.get("description"),
+                context=task.get("context"),
+                executor=_task_executor(task),
+                task_kind=task.get("task_kind"),
+                caller_class=task.get("caller_class"),
+                model_policy=task.get("model_policy"),
+                importance=task.get("importance"),
+                defer_on_quota=bool(task.get("defer_on_quota", True)),
+                budget_decision=task.get("budget_decision"),
+                result=reason,
+            )
+        except Exception:
+            log.warning("Failed to persist unroutable task failure for %s", task_id, exc_info=True)
+
+        st = load_state()
+        owner_chat_id = st.get("owner_chat_id")
+        if owner_chat_id:
+            send_with_budget(int(owner_chat_id), f"⚠️ Task rejected: {reason}")
+
     with _queue_lock:
         st = load_state()
         remaining = budget_remaining(st)
@@ -581,12 +617,11 @@ def assign_tasks() -> None:
                 for i, candidate in enumerate(PENDING):
                     if str(candidate.get("type") or "") == "evolution" and remaining < EVOLUTION_BUDGET_RESERVE:
                         continue
+                    if not _worker_supports_task(w, candidate):
+                        continue
                     chosen_idx = i
                     break
                 if chosen_idx is None:
-                    # Only over-budget evolution tasks remain — clean them out
-                    PENDING[:] = [t for t in PENDING if str(t.get("type") or "") != "evolution"]
-                    queue.persist_queue_snapshot(reason="evolution_dropped_budget")
                     continue
                 task = PENDING.pop(chosen_idx)
                 w.busy_task_id = task["id"]
@@ -607,6 +642,32 @@ def assign_tasks() -> None:
                             f"{emoji} {task_type.capitalize()} task {task['id']} started.",
                         )
                 queue.persist_queue_snapshot(reason="assign_task")
+
+        # Explicitly fail tasks that cannot be routed to any configured worker kind.
+        # This prevents silent fallback where a task marked executor=codex/claude_code
+        # gets executed by an ouroboros worker.
+        available_kinds = {
+            str(getattr(w, "kind", "ouroboros") or "ouroboros").strip().lower()
+            for w in WORKERS.values()
+        }
+        if available_kinds:
+            unroutable: List[Dict[str, Any]] = []
+            still_pending: List[Dict[str, Any]] = []
+            for task in PENDING:
+                if _task_executor(task) in available_kinds:
+                    still_pending.append(task)
+                else:
+                    unroutable.append(task)
+            if unroutable:
+                PENDING[:] = still_pending
+                for task in unroutable:
+                    requested_executor = _task_executor(task)
+                    reason = (
+                        f"executor '{requested_executor}' is not routable: no worker pool "
+                        f"with matching capability is active (available: {', '.join(sorted(available_kinds))})."
+                    )
+                    _fail_unroutable_task(task, reason)
+                queue.persist_queue_snapshot(reason="unroutable_executor_tasks")
 
 
 # ---------------------------------------------------------------------------
@@ -711,5 +772,4 @@ def ensure_workers_healthy() -> None:
         # Kill all workers — direct chat via handle_chat_direct still works
         kill_workers()
         CRASH_TS.clear()
-
 
