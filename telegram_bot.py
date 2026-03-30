@@ -77,8 +77,18 @@ if not TELEGRAM_BOT_ENABLED:
     sys.exit(0)
 
 if not TELEGRAM_INTERNAL_SECRET:
-    log.error("TELEGRAM_INTERNAL_SECRET not configured. Exiting.")
-    sys.exit(1)
+    # Auto-generate secret if not configured
+    import secrets
+    TELEGRAM_INTERNAL_SECRET = secrets.token_urlsafe(32)
+    _settings["TELEGRAM_INTERNAL_SECRET"] = TELEGRAM_INTERNAL_SECRET
+    
+    try:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(_settings, f, indent=2, ensure_ascii=False)
+        log.info("Auto-generated TELEGRAM_INTERNAL_SECRET and saved to settings.json")
+    except Exception as e:
+        log.error("Failed to save TELEGRAM_INTERNAL_SECRET: %s. Exiting.", e)
+        sys.exit(1)
 
 log.info("Telegram bot starting (polling mode)...")
 
