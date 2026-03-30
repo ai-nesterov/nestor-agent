@@ -158,11 +158,10 @@ export function initSettings({ ws, state }) {
             <div class="form-section">
                 <h3>Telegram Bot (optional)</h3>
                 <div class="form-row"><div class="form-field"><label>Telegram Bot Token</label><input id="s-tg-token" type="password" placeholder="123456:ABC-DEF..."></div></div>
-                <div class="form-row"><div class="form-field"><label>Webhook URL</label><input id="s-tg-webhook" placeholder="https://your-ngrok-url.ngrok.io/api/telegram/webhook" style="width:400px"></div></div>
                 <div class="form-row"><div class="form-field"><label>Internal Secret</label><input id="s-tg-secret" type="password" placeholder="Auto-generated or custom secret" style="width:300px"></div></div>
                 <div class="form-row">
                     <label class="local-toggle" style="font-size:14px"><input type="checkbox" id="s-tg-enabled"> Enable Telegram Bot</label>
-                    <div style="font-size:12px;color:var(--text-secondary);margin-top:18px">Get token from @BotFather. Use ngrok/localtunnel for webhook URL. Secret is auto-generated if empty.</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-top:18px">Get token from @BotFather. Bot uses polling (no webhook URL needed). Secret is auto-generated if empty.</div>
                 </div>
             </div>
             <div class="divider"></div>
@@ -334,7 +333,6 @@ export function initSettings({ ws, state }) {
             OUROBOROS_TOOL_TIMEOUT_SEC: parseInt(document.getElementById('s-tool-timeout').value) || 120,
             GITHUB_REPO: document.getElementById('s-gh-repo').value,
             TELEGRAM_BOT_TOKEN: document.getElementById('s-tg-token').value.trim(),
-            TELEGRAM_WEBHOOK_URL: document.getElementById('s-tg-webhook').value.trim(),
             TELEGRAM_INTERNAL_SECRET: document.getElementById('s-tg-secret').value.trim(),
             TELEGRAM_BOT_ENABLED: document.getElementById('s-tg-enabled').checked,
             LOCAL_MODEL_SOURCE: document.getElementById('s-local-source').value,

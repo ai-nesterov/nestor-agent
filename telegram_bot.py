@@ -20,12 +20,6 @@ import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.webhook.aiohttp_server import (
-    SimpleRequestHandler,
-    setup_application,
-    setup_aiohttp_server_and_host,
-)
-from aiohttp import web
 
 # ---------------------------------------------------------------------------
 # Paths and config
@@ -50,9 +44,7 @@ log = logging.getLogger("telegram_bot")
 # Config from environment
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_ENABLED = os.environ.get("TELEGRAM_BOT_ENABLED", "false").lower() in ("true", "1", "yes", "yes")
-TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
 TELEGRAM_INTERNAL_SECRET = os.environ.get("TELEGRAM_INTERNAL_SECRET", "")
-TELEGRAM_BOT_PORT = int(os.environ.get("TELEGRAM_BOT_PORT", "8767"))
 
 SERVER_API_URL = f"http://127.0.0.1:8765/api/telegram/process-message"
 
@@ -250,46 +242,14 @@ async def _forward_to_server(message: Message, text: str):
         await processing_msg.edit_text("⚠️ Внутренняя ошибка. Попробуйте позже.")
 
 # ---------------------------------------------------------------------------
-# Webhook setup
-# ---------------------------------------------------------------------------
-async def post_init():
-    """Register webhook with Telegram after bot starts"""
-    if TELEGRAM_WEBHOOK_URL:
-        try:
-            log.info("Setting webhook to: %s", TELEGRAM_WEBHOOK_URL)
-            await bot.set_webhook(telegram_webhook_url=TELEGRAM_WEBHOOK_URL)
-            log.info("Webhook set successfully")
-        except Exception as e:
-            log.error("Failed to set webhook: %s", e)
-    else:
-        log.warning("TELEGRAM_WEBHOOK_URL not configured. Bot will not receive messages.")
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 async def main():
-    """Start the bot with webhook"""
-    # Setup webhook handler
-    request_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=TELEGRAM_INTERNAL_SECRET,
-    )
+    """Start the bot with polling"""
+    log.info("Starting Telegram bot polling...")
     
-    # Create aiohttp application
-    app = web.Application()
-    setup_application(app, request_handler)
-    
-    # Setup post-init
-    app.on_startup.append(post_init)
-    
-    # Start webhook server
-    log.info("Starting Telegram bot webhook server on port %s", TELEGRAM_BOT_PORT)
-    setup_aiohttp_server_and_host(app, host="127.0.0.1", port=TELEGRAM_BOT_PORT)
-    
-    # Keep running
     try:
-        asyncio.Future().result()  # Run forever
+        await dp.start_polling(bot)
     except KeyboardInterrupt:
         log.info("Telegram bot shutting down")
     finally:

@@ -1,4 +1,4 @@
-# Ouroboros v4.6.0 — Architecture & Reference
+# Ouroboros v4.6.1 — Architecture & Reference
 
 This document describes every component, page, button, API endpoint, and data flow.
 It is the single source of truth for how the system works. Keep it updated.
@@ -76,7 +76,7 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
    - Local model lifecycle endpoints extracted to `ouroboros/local_model_api.py`
 
 3. **telegram_bot.py** — standalone aiogram 3.x Telegram bot process (optional).
-   - Runs on separate port (default 8767) with aiohttp webhook server
+   - Uses aiogram polling (no webhook server needed)
    - Communicates with `server.py` via HTTP API (`/api/telegram/process-message`)
    - Authenticated via `TELEGRAM_INTERNAL_SECRET` header
    - Handles Telegram updates, slash commands, text messages
