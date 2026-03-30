@@ -91,6 +91,8 @@ SETTINGS_DEFAULTS = {
     "USE_LOCAL_CODE": True,
     "USE_LOCAL_LIGHT": True,
     "USE_LOCAL_FALLBACK": True,
+    "EXECUTOR_RUNS_SUBDIR": "executor_runs",
+    "EXECUTOR_WORKTREES_SUBDIR": "worktrees",
 }
 
 _VALID_EFFORTS = ("none", "low", "medium", "high")
@@ -317,6 +319,7 @@ def apply_settings_to_env(settings: dict) -> None:
         "LOCAL_MODEL_PORT", "LOCAL_MODEL_N_GPU_LAYERS", "LOCAL_MODEL_CONTEXT_LENGTH",
         "LOCAL_MODEL_CHAT_FORMAT",
         "USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK",
+        "EXECUTOR_RUNS_SUBDIR", "EXECUTOR_WORKTREES_SUBDIR",
     ]
     for k in env_keys:
         val = settings.get(k)
