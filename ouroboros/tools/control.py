@@ -29,6 +29,8 @@ MAX_SUBTASK_DEPTH = 3
 _ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
 _ALLOWED_ARTIFACT_POLICIES = {"patch_only", "keep_worktree"}
 _ALLOWED_QUOTA_CLASSES = {"cheap", "expensive"}
+_ALLOWED_MODEL_POLICIES = {"cheap", "balanced", "premium", "critical"}
+_ALLOWED_IMPORTANCE = {"low", "medium", "high", "critical"}
 
 
 def _request_restart(ctx: ToolContext, reason: str) -> str:
@@ -67,6 +69,13 @@ def _schedule_task(
     artifact_policy: str = "patch_only",
     quota_class: str = "cheap",
     priority: int = 0,
+    task_type: str = "task",
+    task_kind: str = "general",
+    caller_class: str = "",
+    model_policy: str = "balanced",
+    model_override: str = "",
+    importance: str = "medium",
+    defer_on_quota: bool = True,
 ) -> str:
     current_depth = getattr(ctx, 'task_depth', 0)
     new_depth = current_depth + 1
@@ -101,6 +110,29 @@ def _schedule_task(
             f"Allowed: {', '.join(sorted(_ALLOWED_QUOTA_CLASSES))}"
         )
 
+    model_policy_value = str(model_policy or "balanced").strip().lower()
+    if model_policy_value not in _ALLOWED_MODEL_POLICIES:
+        return (
+            f"ERROR: Unknown model_policy '{model_policy}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_MODEL_POLICIES))}"
+        )
+    importance_value = str(importance or "medium").strip().lower()
+    if importance_value not in _ALLOWED_IMPORTANCE:
+        return (
+            f"ERROR: Unknown importance '{importance}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_IMPORTANCE))}"
+        )
+    task_type_value = str(task_type or "task").strip().lower() or "task"
+    task_kind_value = str(task_kind or "general").strip().lower() or "general"
+    caller_class_value = str(caller_class or "").strip().lower()
+    if not caller_class_value:
+        if str(getattr(ctx, "current_task_type", "")).lower() == "consciousness":
+            caller_class_value = "consciousness"
+        elif str(getattr(ctx, "current_task_type", "")).lower() == "review":
+            caller_class_value = "review"
+        else:
+            caller_class_value = "main_task_agent"
+
     safe_repo_scope = [str(p) for p in (repo_scope or []) if str(p).strip()]
     safe_constraints = dict(constraints or {})
 
@@ -117,6 +149,13 @@ def _schedule_task(
         "artifact_policy": artifact_policy_value,
         "quota_class": quota_class_value,
         "priority": int(priority),
+        "task_type": task_type_value,
+        "task_kind": task_kind_value,
+        "caller_class": caller_class_value,
+        "model_policy": model_policy_value,
+        "model_override": str(model_override or "").strip(),
+        "importance": importance_value,
+        "defer_on_quota": bool(defer_on_quota),
     }
     if context:
         evt["context"] = context
@@ -137,6 +176,13 @@ def _schedule_task(
             artifact_policy=artifact_policy_value,
             quota_class=quota_class_value,
             priority=int(priority),
+            task_type=task_type_value,
+            task_kind=task_kind_value,
+            caller_class=caller_class_value,
+            model_policy=model_policy_value,
+            model_override=str(model_override or "").strip(),
+            importance=importance_value,
+            defer_on_quota=bool(defer_on_quota),
             result="Task request queued. Awaiting supervisor acceptance.",
         )
     except Exception:
@@ -351,6 +397,11 @@ def _wait_for_task(ctx: ToolContext, task_id: str) -> str:
     return _get_task_result(ctx, task_id)
 
 
+def _resume_deferred_tasks(ctx: ToolContext, limit: int = 20) -> str:
+    ctx.pending_events.append({"type": "resume_deferred_tasks", "limit": int(limit), "ts": utc_now_iso()})
+    return f"Resume deferred tasks requested (limit={int(limit)})."
+
+
 def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry("request_restart", {
@@ -376,6 +427,13 @@ def get_tools() -> List[ToolEntry]:
                 "artifact_policy": {"type": "string", "enum": ["patch_only", "keep_worktree"], "default": "patch_only"},
                 "quota_class": {"type": "string", "enum": ["cheap", "expensive"], "default": "cheap"},
                 "priority": {"type": "integer", "default": 0},
+                "task_type": {"type": "string", "default": "task", "description": "queue task type: task|review|evolution"},
+                "task_kind": {"type": "string", "default": "general", "description": "semantic task class: general|review_plan|review_code|refactor_plan|evolution_plan|implement"},
+                "caller_class": {"type": "string", "default": "main_task_agent", "description": "caller class for policy routing"},
+                "model_policy": {"type": "string", "enum": ["cheap", "balanced", "premium", "critical"], "default": "balanced"},
+                "model_override": {"type": "string", "description": "optional explicit model pin for this task"},
+                "importance": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
+                "defer_on_quota": {"type": "boolean", "default": True, "description": "defer task instead of hard rejection when quota-policy blocks it"},
             }, "required": ["description"]},
         }, _schedule_task),
         ToolEntry("cancel_task", {
@@ -468,4 +526,11 @@ def get_tools() -> List[ToolEntry]:
                 "task_id": {"type": "string", "description": "Task ID to check"},
             }},
         }, _wait_for_task),
+        ToolEntry("resume_deferred_tasks", {
+            "name": "resume_deferred_tasks",
+            "description": "Attempt to re-admit deferred external tasks after quota reset or policy changes.",
+            "parameters": {"type": "object", "required": [], "properties": {
+                "limit": {"type": "integer", "default": 20},
+            }},
+        }, _resume_deferred_tasks),
     ]

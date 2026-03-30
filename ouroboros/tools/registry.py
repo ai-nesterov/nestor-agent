@@ -183,7 +183,7 @@ CORE_TOOL_NAMES = {
     "run_shell", "claude_code_edit",
     "git_status", "git_diff",
     "pull_from_remote", "restore_to_head", "revert_commit",
-    "schedule_task", "wait_for_task", "get_task_result",
+    "schedule_task", "wait_for_task", "get_task_result", "resume_deferred_tasks",
     "update_scratchpad", "update_identity",
     "chat_history", "web_search",
     "send_user_message", "switch_model",

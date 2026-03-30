@@ -108,7 +108,7 @@ EXPECTED_TOOLS = [
     "close_github_issue", "create_github_issue",
     "summarize_dialogue",
     # Task decomposition
-    "get_task_result", "wait_for_task",
+    "get_task_result", "wait_for_task", "resume_deferred_tasks",
     "generate_evolution_stats",
     # VLM / Vision
     "analyze_screenshot", "vlm_query",

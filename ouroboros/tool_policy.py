@@ -21,7 +21,7 @@ CORE_TOOL_NAMES = frozenset({
     "git_status", "git_diff",
     "restore_to_head", "revert_commit",
     "pull_from_remote",
-    "schedule_task", "wait_for_task", "get_task_result",
+    "schedule_task", "wait_for_task", "get_task_result", "resume_deferred_tasks",
     "validate_executor_result", "apply_task_patch", "discard_task_patch",
     "update_scratchpad", "update_identity",
     "chat_history", "web_search",

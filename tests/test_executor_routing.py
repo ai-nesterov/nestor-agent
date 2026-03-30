@@ -62,3 +62,27 @@ def test_ouroboros_task_still_schedules_when_external_disabled(tmp_path, monkeyp
 
     assert len(ctx.enqueued) == 1
     assert ctx.enqueued[0]["executor"] == "ouroboros"
+
+
+def test_external_review_planning_task_can_be_scheduled_when_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXTERNAL_EXECUTORS_ENABLED", "true")
+    monkeypatch.setenv("CODEX_ENABLED", "true")
+    monkeypatch.setenv("CODEX_ALLOWED_IN_REVIEW", "true")
+
+    ctx = FakeCtx(tmp_path)
+    ev_module._handle_schedule_task(
+        {
+            "type": "schedule_task",
+            "task_id": "rev001",
+            "description": "Plan review strategy",
+            "depth": 1,
+            "executor": "codex",
+            "task_type": "review",
+            "task_kind": "review_plan",
+            "caller_class": "review",
+        },
+        ctx,
+    )
+
+    assert len(ctx.enqueued) == 1
+    assert ctx.enqueued[0]["task_kind"] == "review_plan"
