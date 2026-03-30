@@ -309,8 +309,17 @@ def _get_task_result(ctx: ToolContext, task_id: str) -> str:
     result = data.get("result", "")
     cost = data.get("cost_usd", 0)
     trace = data.get("trace_summary", "")
+    executor = str(data.get("executor") or "ouroboros")
+    changed_files = data.get("changed_files") or []
+    diff_stat = data.get("diff_stat") or {}
+    artifact_dir = data.get("artifact_dir")
+    tests_run = data.get("tests_run") or []
+    tests_passed = data.get("tests_passed")
     if status == STATUS_COMPLETED:
-        output = f"Task {task_id} [{status}]: cost=${cost:.2f}\n\n[BEGIN_SUBTASK_OUTPUT]\n{result}\n[END_SUBTASK_OUTPUT]"
+        output = (
+            f"Task {task_id} [{status}]: executor={executor}, cost=${cost:.2f}\n\n"
+            f"[BEGIN_SUBTASK_OUTPUT]\n{result}\n[END_SUBTASK_OUTPUT]"
+        )
     elif status == STATUS_REJECTED_DUPLICATE:
         duplicate_of = str(data.get("duplicate_of") or "?")
         output = (
@@ -318,7 +327,20 @@ def _get_task_result(ctx: ToolContext, task_id: str) -> str:
             f"{result or f'Task was rejected as a duplicate of {duplicate_of}.'}"
         )
     else:
-        output = f"Task {task_id} [{status}]: {result or 'No details available.'}"
+        output = f"Task {task_id} [{status}]: executor={executor} {result or 'No details available.'}"
+    if changed_files:
+        output += f"\n\n[CHANGED_FILES]\n" + "\n".join(f"- {p}" for p in changed_files)
+    if diff_stat:
+        output += (
+            "\n\n[DIFF_STAT]\n"
+            f"files={int(diff_stat.get('files') or 0)}, "
+            f"insertions={int(diff_stat.get('insertions') or 0)}, "
+            f"deletions={int(diff_stat.get('deletions') or 0)}"
+        )
+    if tests_run or tests_passed is not None:
+        output += f"\n\n[TESTS]\npassed={tests_passed}\nrun={tests_run}"
+    if artifact_dir:
+        output += f"\n\n[ARTIFACT_DIR]\n{artifact_dir}\n[IMPORT_HINT]\nUse apply_task_patch(task_id=\"{task_id}\") after validate_executor_result."
     if trace:
         output += f"\n\n[SUBTASK_TRACE]\n{trace}\n[/SUBTASK_TRACE]"
     return output

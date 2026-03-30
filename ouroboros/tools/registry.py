@@ -188,7 +188,7 @@ CORE_TOOL_NAMES = {
     "chat_history", "web_search",
     "send_user_message", "switch_model",
     "request_restart", "promote_to_stable",
-    "apply_task_patch", "discard_task_patch",
+    "apply_task_patch", "discard_task_patch", "validate_executor_result",
     "knowledge_read", "knowledge_write", "knowledge_list",
     "browse_page", "browser_action", "analyze_screenshot",
 }

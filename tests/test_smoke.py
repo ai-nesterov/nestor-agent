@@ -89,7 +89,7 @@ EXPECTED_TOOLS = [
     "data_read", "data_write", "data_list",
     "git_status", "git_diff",
     "pull_from_remote", "restore_to_head", "revert_commit",
-    "apply_task_patch", "discard_task_patch",
+    "apply_task_patch", "discard_task_patch", "validate_executor_result",
     "run_shell", "claude_code_edit",
     "browse_page", "browser_action",
     "web_search",
