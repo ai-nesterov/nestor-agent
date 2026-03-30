@@ -141,7 +141,7 @@ def _get_chat_agent():
     return _chat_agent
 
 
-def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple[str, str], Tuple[str, str, str]]] = None) -> None:
+def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple[str, str], Tuple[str, str, str]]] = None, telegram_chat_id: Optional[int] = None) -> None:
     from supervisor.state import budget_remaining, load_state
     if budget_remaining(load_state()) <= 0:
         try:
@@ -160,6 +160,8 @@ def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple
             "text": text,
             "_is_direct_chat": True,
         }
+        if telegram_chat_id:
+            task["_telegram_chat_id"] = telegram_chat_id
         if image_data:
             # image_data is (base64, mime) or (base64, mime, caption)
             task["image_base64"] = image_data[0]
