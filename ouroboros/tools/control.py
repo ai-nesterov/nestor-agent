@@ -34,6 +34,27 @@ _ALLOWED_IMPORTANCE = {"low", "medium", "high", "critical"}
 _ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
 
 
+def _emit_control_event(ctx: ToolContext, evt: Dict[str, Any]) -> bool:
+    """Emit control-plane events immediately when event_queue is available.
+
+    Returns True when event was delivered to supervisor queue immediately.
+    Caller should append to pending_events only when this returns False.
+    """
+    q = getattr(ctx, "event_queue", None)
+    if q is None:
+        return False
+    try:
+        put_nowait = getattr(q, "put_nowait", None)
+        if callable(put_nowait):
+            put_nowait(evt)
+        else:
+            q.put(evt)
+        return True
+    except Exception:
+        log.debug("Immediate control event emit failed; falling back to pending_events", exc_info=True)
+        return False
+
+
 def _request_restart(ctx: ToolContext, reason: str) -> str:
     if str(ctx.current_task_type or "") == "evolution" and not ctx.last_push_succeeded:
         return "⚠️ RESTART_BLOCKED: in evolution mode, commit+push first."
@@ -170,7 +191,8 @@ def _schedule_task(
         evt["context"] = context
     if parent_task_id:
         evt["parent_task_id"] = parent_task_id
-    ctx.pending_events.append(evt)
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     try:
         write_task_result(
             ctx.drive_root,
@@ -201,12 +223,16 @@ def _schedule_task(
 
 
 def _cancel_task(ctx: ToolContext, task_id: str) -> str:
-    ctx.pending_events.append({"type": "cancel_task", "task_id": task_id, "ts": utc_now_iso()})
+    evt = {"type": "cancel_task", "task_id": task_id, "ts": utc_now_iso()}
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     return f"Cancel requested: {task_id}"
 
 
 def _request_review(ctx: ToolContext, reason: str) -> str:
-    ctx.pending_events.append({"type": "review_request", "reason": reason, "ts": utc_now_iso()})
+    evt = {"type": "review_request", "reason": reason, "ts": utc_now_iso()}
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     return f"Review requested: {reason}"
 
 
@@ -408,7 +434,9 @@ def _wait_for_task(ctx: ToolContext, task_id: str) -> str:
 
 
 def _resume_deferred_tasks(ctx: ToolContext, limit: int = 20) -> str:
-    ctx.pending_events.append({"type": "resume_deferred_tasks", "limit": int(limit), "ts": utc_now_iso()})
+    evt = {"type": "resume_deferred_tasks", "limit": int(limit), "ts": utc_now_iso()}
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     return f"Resume deferred tasks requested (limit={int(limit)})."
 
 

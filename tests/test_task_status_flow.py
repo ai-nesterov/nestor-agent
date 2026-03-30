@@ -102,6 +102,50 @@ def test_handle_schedule_task_duplicate_writes_rejected_status(tmp_path, monkeyp
     assert sent and "Task rejected" in sent[0][1]
 
 
+def test_handle_schedule_task_idempotent_by_task_id(tmp_path, monkeypatch):
+    from supervisor import events as ev_module
+    from supervisor import queue as q_module
+
+    monkeypatch.setenv("EXTERNAL_EXECUTORS_ENABLED", "false")
+    pending = []
+    running = {}
+    seq = {"value": 0}
+    q_module.init(tmp_path, soft_timeout=60, hard_timeout=120)
+    q_module.init_queue_refs(pending, running, seq)
+
+    class FakeCtx:
+        DRIVE_ROOT = tmp_path
+        PENDING = pending
+        RUNNING = running
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def send_with_budget(self, chat_id, text, **kwargs):
+            return None
+
+        def enqueue_task(self, task):
+            return q_module.enqueue_task(task)
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+    evt = {
+        "type": "schedule_task",
+        "task_id": "idem001",
+        "description": "Do the thing once",
+        "depth": 1,
+    }
+    ev_module._handle_schedule_task(evt, FakeCtx())
+    ev_module._handle_schedule_task(evt, FakeCtx())
+
+    assert len(pending) == 1
+    assert pending[0]["id"] == "idem001"
+
+
 def test_handle_text_response_keeps_full_reasoning_note():
     from ouroboros.loop import _handle_text_response
 

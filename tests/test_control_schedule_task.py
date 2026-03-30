@@ -176,3 +176,20 @@ class TestScheduleTask:
         assert "Task request queued" in result
         assert mock_ctx.pending_events[0].get("context") == context
         assert mock_ctx.pending_events[0].get("parent_task_id") == parent_id
+
+    def test_schedule_task_emits_immediately_when_event_queue_available(self, mock_ctx: ToolContext):
+        """Control-plane events should be sent to supervisor immediately."""
+        emitted = []
+
+        class _Q:
+            def put_nowait(self, evt):
+                emitted.append(evt)
+
+        mock_ctx.event_queue = _Q()
+        result = _schedule_task(mock_ctx, description="Immediate task", executor="codex")
+
+        assert "Task request queued" in result
+        assert len(emitted) == 1
+        assert emitted[0]["type"] == "schedule_task"
+        assert emitted[0]["executor"] == "codex"
+        assert mock_ctx.pending_events == []

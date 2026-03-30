@@ -20,6 +20,7 @@ from ouroboros.task_results import (
     STATUS_COMPLETED,
     STATUS_REJECTED_DUPLICATE,
     STATUS_SCHEDULED,
+    load_task_result,
     write_task_result,
 )
 
@@ -623,6 +624,17 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
     importance = str(evt.get("importance") or "medium").strip().lower() or "medium"
     defer_on_quota = bool(evt.get("defer_on_quota", True))
     budget_decision = _normalize_budget_decision(evt.get("budget_decision"))
+
+    # Idempotency guard: the same task_id may be delivered twice when a caller
+    # retries control events. Never enqueue/process it twice.
+    from supervisor.queue import PENDING, RUNNING
+    if any(str(t.get("id") or "") == tid for t in PENDING):
+        return
+    if tid in RUNNING:
+        return
+    existing_result = load_task_result(ctx.DRIVE_ROOT, tid)
+    if isinstance(existing_result, dict) and str(existing_result.get("status") or "").strip():
+        return
 
     # Check depth limit
     if depth > 3:
