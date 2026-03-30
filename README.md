@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.6.9](https://img.shields.io/badge/version-4.6.9-green.svg)](VERSION)
+[![Version 4.7.0](https://img.shields.io/badge/version-4.7.0-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -247,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.7.0 | 2026-03-30 | Telegram bot security hardening via external worker code review. Applied combined patch from codex+claude_code: user authorization for admin commands, HTTP client pooling, from_user=None handling, secret redaction in logs, retry logic for 5xx errors. Regression tests added. External worker workflow validated: code review → fix proposals → final patch merge ($0.40 total).
 | 4.6.9 | 2026-03-30 | External worker integration: first successful patch application from codex executor. Added tests/test_codex_worker_final.py (external executor generated). Full cycle: schedule_task → wait_for_task → validate_executor_result → apply_task_patch → repo_commit. External workers now fully operational.
 | 4.6.8 | 2026-03-30 | Add unit tests for `_schedule_task` in `ouroboros/tools/control.py`: executor validation (ouroboros/claude_code/codex), artifact_policy validation, task_id generation, subtask depth limit enforcement. 15 tests, all passing.
 | 4.6.6 | 2026-03-30 | Fix httpx client context manager: `get_http_client()` returns a coroutine that must be awaited before use as async context manager. Resolves TypeError "'coroutine' object does not support the asynchronous context manager protocol".
