@@ -331,6 +331,7 @@ export function initSettings({ ws, state }) {
             OUROBOROS_HARD_TIMEOUT_SEC: parseInt(document.getElementById('s-hard-timeout').value) || 1800,
             OUROBOROS_TOOL_TIMEOUT_SEC: parseInt(document.getElementById('s-tool-timeout').value) || 120,
             GITHUB_REPO: document.getElementById('s-gh-repo').value,
+            TELEGRAM_BOT_TOKEN: document.getElementById('s-tg-token').value.trim(),
             TELEGRAM_WEBHOOK_URL: document.getElementById('s-tg-webhook').value.trim(),
             TELEGRAM_BOT_ENABLED: document.getElementById('s-tg-enabled').checked,
             LOCAL_MODEL_SOURCE: document.getElementById('s-local-source').value,
