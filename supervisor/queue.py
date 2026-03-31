@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import os
 import pathlib
 import threading
 import time
@@ -480,16 +481,20 @@ def enforce_task_timeouts() -> None:
 # ---------------------------------------------------------------------------
 
 def build_evolution_task_text(cycle: int) -> str:
-    """Build evolution task text with explicit goal requirement.
-    
-    IMPORTANT: An evolution task MUST have a concrete goal - it should NOT just
-    check status and ask 'what next?'. If there's no specific improvement to make,
-    do NOT trigger evolution.
-    
-    The task should answer: What exact technical, cognitive, or existential
-    improvement will be made in THIS cycle?
+    """Build evolution task text for autonomous cycles.
+
+    Automatic evolution must choose and execute one concrete improvement on its
+    own. Asking the owner to choose a goal is not a completed cycle.
     """
-    return f"EVOLUTION #{cycle}: [SPECIFY CONCRETE GOAL]"
+    return (
+        f"EVOLUTION #{cycle}\n\n"
+        "Autonomous cycle: choose one concrete technical, cognitive, or "
+        "existential improvement and execute it. A status report alone is not "
+        "a completed evolution cycle.\n"
+        "If owner input is truly required, stop once with an explicit "
+        "NEEDS_OWNER_INPUT conclusion. Do not ask the owner to choose and then "
+        "continue into another automatic evolution cycle."
+    )
 
 
 def build_review_task_text(reason: str) -> str:
@@ -563,6 +568,24 @@ def enqueue_evolution_task_if_needed() -> None:
             f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
             f"Use /evolve start to resume after investigating the issue."
         )
+        return
+
+    outcome = str(st.get("evolution_last_outcome") or "").strip().lower()
+    outcome_ts = parse_iso_to_ts(str(st.get("evolution_last_outcome_at") or ""))
+    owner_msg_ts = parse_iso_to_ts(str(st.get("last_owner_message_at") or ""))
+    if bool(st.get("evolution_waiting_for_owner")):
+        if owner_msg_ts is None or outcome_ts is None or owner_msg_ts <= outcome_ts:
+            return
+        st["evolution_waiting_for_owner"] = False
+        st["evolution_blocked_reason"] = ""
+        save_state(st)
+
+    cooldown_sec = 0
+    if outcome == "blocked_external":
+        cooldown_sec = int(os.environ.get("OUROBOROS_EVOLUTION_BLOCKED_COOLDOWN_SEC", "600") or "600")
+    elif outcome == "no_actionable_goal":
+        cooldown_sec = int(os.environ.get("OUROBOROS_EVOLUTION_IDLE_COOLDOWN_SEC", "1800") or "1800")
+    if cooldown_sec > 0 and outcome_ts is not None and (time.time() - outcome_ts) < cooldown_sec:
         return
 
     remaining = budget_remaining(st)

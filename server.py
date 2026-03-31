@@ -360,13 +360,15 @@ def _run_supervisor(settings: dict) -> None:
                 elif lowered.startswith("/review"):
                     queue_review_task(reason="owner:/review", force=True)
                 elif lowered.startswith("/evolve"):
-                    parts = lowered.split()
+                    parts = lowered.split(maxsplit=2)
                     action = parts[1] if len(parts) > 1 else "on"
                     turn_on = action not in ("off", "stop", "0")
                     st2 = load_state()
                     st2["evolution_mode_enabled"] = bool(turn_on)
                     if turn_on:
                         st2["evolution_consecutive_failures"] = 0
+                        st2["evolution_waiting_for_owner"] = False
+                        st2["evolution_blocked_reason"] = ""
                     save_state(st2)
                     if not turn_on:
                         PENDING[:] = [t for t in PENDING if str(t.get("type")) != "evolution"]
