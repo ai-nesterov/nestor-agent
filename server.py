@@ -590,6 +590,9 @@ async def api_state(request: Request) -> JSONResponse:
             "minimax_requests_5h_used": int(st.get("minimax_requests_5h_used") or 0),
             "minimax_requests_5h_limit": int(st.get("minimax_requests_5h_limit") or 0),
             "minimax_requests_5h_remaining": st.get("minimax_requests_5h_remaining"),
+            "minimax_requests_weekly_used": int(st.get("minimax_requests_weekly_used") or 0),
+            "minimax_requests_weekly_limit": int(st.get("minimax_requests_weekly_limit") or 0),
+            "minimax_requests_weekly_remaining": st.get("minimax_requests_weekly_remaining"),
             "supervisor_ready": _supervisor_ready.is_set(),
             "supervisor_error": _supervisor_error,
         })
@@ -995,6 +998,9 @@ async def api_cost_breakdown(request: Request) -> JSONResponse:
         "minimax_requests_5h_used": int(state.get("minimax_requests_5h_used") or 0),
         "minimax_requests_5h_limit": int(state.get("minimax_requests_5h_limit") or 0),
         "minimax_requests_5h_remaining": state.get("minimax_requests_5h_remaining"),
+        "minimax_requests_weekly_used": int(state.get("minimax_requests_weekly_used") or 0),
+        "minimax_requests_weekly_limit": int(state.get("minimax_requests_weekly_limit") or 0),
+        "minimax_requests_weekly_remaining": state.get("minimax_requests_weekly_remaining"),
     })
 
 

@@ -162,6 +162,10 @@ def ensure_state_defaults(st: Dict[str, Any]) -> Dict[str, Any]:
     st.setdefault("minimax_requests_5h_used", 0)
     st.setdefault("minimax_requests_5h_limit", 0)
     st.setdefault("minimax_requests_5h_remaining", None)
+    st.setdefault("minimax_requests_weekly_timestamps", [])
+    st.setdefault("minimax_requests_weekly_used", 0)
+    st.setdefault("minimax_requests_weekly_limit", 0)
+    st.setdefault("minimax_requests_weekly_remaining", None)
     for legacy_key in ("approvals", "idle_cursor", "idle_stats", "last_idle_task_at",
                         "last_auto_review_at", "last_review_task_id", "session_daily_snapshot"):
         st.pop(legacy_key, None)
@@ -354,6 +358,20 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> None:
                 kept.append(ts.isoformat())
         return kept
 
+    def _prune_minimax_weekly_window(timestamps: list[str]) -> list[str]:
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+        kept: list[str] = []
+        for raw in timestamps:
+            try:
+                ts = datetime.datetime.fromisoformat(str(raw))
+            except Exception:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+            if ts >= cutoff:
+                kept.append(ts.isoformat())
+        return kept
+
     # Step 1: Update budget counters under lock (fast, no I/O beyond Drive)
     lock_fd = acquire_file_lock(STATE_LOCK_PATH)
     try:
@@ -372,25 +390,55 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> None:
             usage.get("cached_tokens") if isinstance(usage, dict) else 0)
         provider = str(usage.get("provider") if isinstance(usage, dict) else "").strip().lower()
         if provider == "minimax":
-            timestamps = st.get("minimax_requests_5h_timestamps")
-            if not isinstance(timestamps, list):
-                timestamps = []
-            timestamps = _prune_minimax_rolling_window([str(ts) for ts in timestamps])
-            timestamps.append(datetime.datetime.now(datetime.timezone.utc).isoformat())
-            limit = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
-            st["minimax_requests_5h_timestamps"] = timestamps
-            st["minimax_requests_5h_used"] = len(timestamps)
-            st["minimax_requests_5h_limit"] = limit
-            st["minimax_requests_5h_remaining"] = max(0, limit - len(timestamps)) if limit > 0 else None
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            timestamps_5h = st.get("minimax_requests_5h_timestamps")
+            if not isinstance(timestamps_5h, list):
+                timestamps_5h = []
+            timestamps_5h = _prune_minimax_rolling_window([str(ts) for ts in timestamps_5h])
+            timestamps_5h.append(now_iso)
+            limit_5h = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
+            st["minimax_requests_5h_timestamps"] = timestamps_5h
+            st["minimax_requests_5h_used"] = len(timestamps_5h)
+            st["minimax_requests_5h_limit"] = limit_5h
+            st["minimax_requests_5h_remaining"] = max(0, limit_5h - len(timestamps_5h)) if limit_5h > 0 else None
+
+            timestamps_weekly = st.get("minimax_requests_weekly_timestamps")
+            if not isinstance(timestamps_weekly, list):
+                timestamps_weekly = []
+            timestamps_weekly = _prune_minimax_weekly_window([str(ts) for ts in timestamps_weekly])
+            timestamps_weekly.append(now_iso)
+            limit_weekly = _to_int(
+                os.environ.get("MINIMAX_REQUESTS_WEEKLY_LIMIT", st.get("minimax_requests_weekly_limit") or 0)
+            )
+            st["minimax_requests_weekly_timestamps"] = timestamps_weekly
+            st["minimax_requests_weekly_used"] = len(timestamps_weekly)
+            st["minimax_requests_weekly_limit"] = limit_weekly
+            st["minimax_requests_weekly_remaining"] = (
+                max(0, limit_weekly - len(timestamps_weekly)) if limit_weekly > 0 else None
+            )
         else:
-            timestamps = st.get("minimax_requests_5h_timestamps")
-            if isinstance(timestamps, list):
-                pruned = _prune_minimax_rolling_window([str(ts) for ts in timestamps])
-                st["minimax_requests_5h_timestamps"] = pruned
-                st["minimax_requests_5h_used"] = len(pruned)
-                limit = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
-                st["minimax_requests_5h_limit"] = limit
-                st["minimax_requests_5h_remaining"] = max(0, limit - len(pruned)) if limit > 0 else None
+            timestamps_5h = st.get("minimax_requests_5h_timestamps")
+            if isinstance(timestamps_5h, list):
+                pruned_5h = _prune_minimax_rolling_window([str(ts) for ts in timestamps_5h])
+                st["minimax_requests_5h_timestamps"] = pruned_5h
+                st["minimax_requests_5h_used"] = len(pruned_5h)
+                limit_5h = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
+                st["minimax_requests_5h_limit"] = limit_5h
+                st["minimax_requests_5h_remaining"] = max(0, limit_5h - len(pruned_5h)) if limit_5h > 0 else None
+
+            timestamps_weekly = st.get("minimax_requests_weekly_timestamps")
+            if isinstance(timestamps_weekly, list):
+                pruned_weekly = _prune_minimax_weekly_window([str(ts) for ts in timestamps_weekly])
+                st["minimax_requests_weekly_timestamps"] = pruned_weekly
+                st["minimax_requests_weekly_used"] = len(pruned_weekly)
+                limit_weekly = _to_int(
+                    os.environ.get("MINIMAX_REQUESTS_WEEKLY_LIMIT", st.get("minimax_requests_weekly_limit") or 0)
+                )
+                st["minimax_requests_weekly_limit"] = limit_weekly
+                st["minimax_requests_weekly_remaining"] = (
+                    max(0, limit_weekly - len(pruned_weekly)) if limit_weekly > 0 else None
+                )
         should_check_ground_truth = (provider == "openrouter" and st["spent_calls"] % 50 == 0)
         _save_state_unlocked(st)
     finally:

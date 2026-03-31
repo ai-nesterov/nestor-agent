@@ -42,6 +42,9 @@ def test_cost_breakdown_reads_minimax_window_from_state_module(tmp_path, monkeyp
             "minimax_requests_5h_used": 12,
             "minimax_requests_5h_limit": 1450,
             "minimax_requests_5h_remaining": 1438,
+            "minimax_requests_weekly_used": 120,
+            "minimax_requests_weekly_limit": 5000,
+            "minimax_requests_weekly_remaining": 4880,
         },
     )
 
@@ -51,6 +54,9 @@ def test_cost_breakdown_reads_minimax_window_from_state_module(tmp_path, monkeyp
     assert payload["minimax_requests_5h_used"] == 12
     assert payload["minimax_requests_5h_limit"] == 1450
     assert payload["minimax_requests_5h_remaining"] == 1438
+    assert payload["minimax_requests_weekly_used"] == 120
+    assert payload["minimax_requests_weekly_limit"] == 5000
+    assert payload["minimax_requests_weekly_remaining"] == 4880
 
 
 def test_cost_breakdown_uses_call_metric_for_minimax_when_costs_are_zero(tmp_path, monkeypatch):

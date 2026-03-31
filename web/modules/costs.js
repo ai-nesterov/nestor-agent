@@ -22,6 +22,7 @@ export function initCosts({ ws, state }) {
             </div>
             <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px">
                 <div class="stat-card"><div class="stat-label">MiniMax 5h Window</div><div class="stat-value" id="minimax-5h-window">0 / 0</div></div>
+                <div class="stat-card"><div class="stat-label">MiniMax Weekly Window</div><div class="stat-value" id="minimax-weekly-window">0 / 0</div></div>
             </div>
             <div style="margin-bottom:24px">
                 <h3 style="font-size:14px;color:var(--text-secondary);margin:0 0 8px">External Worker Limits</h3>
@@ -133,6 +134,11 @@ export function initCosts({ ws, state }) {
             const minimaxRemaining = d.minimax_requests_5h_remaining;
             document.getElementById('minimax-5h-window').textContent =
                 minimaxLimit > 0 ? `${minimaxUsed} / ${minimaxLimit} (${minimaxRemaining} left)` : `${minimaxUsed} / unknown`;
+            const minimaxWeeklyLimit = d.minimax_requests_weekly_limit || 0;
+            const minimaxWeeklyUsed = d.minimax_requests_weekly_used || 0;
+            const minimaxWeeklyRemaining = d.minimax_requests_weekly_remaining;
+            document.getElementById('minimax-weekly-window').textContent =
+                minimaxWeeklyLimit > 0 ? `${minimaxWeeklyUsed} / ${minimaxWeeklyLimit} (${minimaxWeeklyRemaining} left)` : `${minimaxWeeklyUsed} / unknown`;
             const totals = {
                 totalCost: d.total_cost || 0,
                 totalCalls: d.total_calls || 0,

@@ -41,10 +41,12 @@ class TestSettingsUiGuards(unittest.TestCase):
         self.assertIn("Primary Cloud Provider", source)
         self.assertIn("MiniMax API Key", source)
         self.assertIn("MINIMAX_REQUESTS_5H_LIMIT", source)
+        self.assertIn("MINIMAX_REQUESTS_WEEKLY_LIMIT", source)
         self.assertIn("Consolidation Model", source)
 
     def test_wizard_mentions_minimax(self):
         source = (REPO / "launcher.py").read_text(encoding="utf-8")
         self.assertIn("MiniMax API Key", source)
+        self.assertIn("MiniMax Weekly Request Limit", source)
         self.assertIn("LLM_PROVIDER", source)
         self.assertIn("OpenRouter, MiniMax or local model", source)

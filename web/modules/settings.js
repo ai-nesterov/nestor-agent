@@ -27,6 +27,7 @@ export function initSettings({ ws, state }) {
                     <div class="form-field"><label>MiniMax Plan Type</label><input id="s-minimax-plan-type" value="token_plan" style="width:180px"></div>
                     <div class="form-field"><label>MiniMax Plan Tier</label><input id="s-minimax-plan-tier" placeholder="starter / custom" style="width:180px"></div>
                     <div class="form-field"><label>MiniMax 5h Request Limit</label><input id="s-minimax-5h-limit" type="number" value="0" style="width:140px"></div>
+                    <div class="form-field"><label>MiniMax Weekly Request Limit</label><input id="s-minimax-weekly-limit" type="number" value="0" style="width:160px"></div>
                 </div>
             </div>
             <div class="divider"></div>
@@ -255,6 +256,7 @@ export function initSettings({ ws, state }) {
         document.getElementById('s-minimax-plan-type').value = s.MINIMAX_PLAN_TYPE || 'token_plan';
         document.getElementById('s-minimax-plan-tier').value = s.MINIMAX_PLAN_TIER || '';
         if (s.MINIMAX_REQUESTS_5H_LIMIT != null) document.getElementById('s-minimax-5h-limit').value = s.MINIMAX_REQUESTS_5H_LIMIT;
+        if (s.MINIMAX_REQUESTS_WEEKLY_LIMIT != null) document.getElementById('s-minimax-weekly-limit').value = s.MINIMAX_REQUESTS_WEEKLY_LIMIT;
         if (s.OPENAI_API_KEY) document.getElementById('s-openai').value = s.OPENAI_API_KEY;
         if (s.ANTHROPIC_API_KEY) document.getElementById('s-anthropic').value = s.ANTHROPIC_API_KEY;
         if (s.OUROBOROS_MODEL) document.getElementById('s-model').value = s.OUROBOROS_MODEL;
@@ -403,6 +405,7 @@ export function initSettings({ ws, state }) {
             MINIMAX_PLAN_TYPE: document.getElementById('s-minimax-plan-type').value.trim() || 'token_plan',
             MINIMAX_PLAN_TIER: document.getElementById('s-minimax-plan-tier').value.trim(),
             MINIMAX_REQUESTS_5H_LIMIT: parseInt(document.getElementById('s-minimax-5h-limit').value) || 0,
+            MINIMAX_REQUESTS_WEEKLY_LIMIT: parseInt(document.getElementById('s-minimax-weekly-limit').value) || 0,
             OUROBOROS_MODEL: document.getElementById('s-model').value,
             OUROBOROS_MODEL_CODE: document.getElementById('s-model-code').value,
             OUROBOROS_MODEL_LIGHT: document.getElementById('s-model-light').value,

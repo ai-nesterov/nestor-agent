@@ -739,6 +739,7 @@ a { color:#e85d6f; }
   </div>
   <div class="row">
     <div class="field"><label>MiniMax 5h Request Limit</label><input id="minimax-5h-limit" type="number" value="0" min="0" step="1"></div>
+    <div class="field"><label>MiniMax Weekly Request Limit</label><input id="minimax-weekly-limit" type="number" value="0" min="0" step="1"></div>
     <div class="field"><label>MiniMax Plan Type</label><input id="minimax-plan-type" value="token_plan"></div>
   </div>
 
@@ -798,6 +799,7 @@ btn.addEventListener('click', async () => {
         LLM_PROVIDER: document.getElementById('cloud-provider').value || 'openrouter',
         MINIMAX_PLAN_TYPE: document.getElementById('minimax-plan-type').value.trim() || 'token_plan',
         MINIMAX_REQUESTS_5H_LIMIT: parseInt(document.getElementById('minimax-5h-limit').value) || 0,
+        MINIMAX_REQUESTS_WEEKLY_LIMIT: parseInt(document.getElementById('minimax-weekly-limit').value) || 0,
     };
     const orKey = keyInput.value.trim();
     if (orKey.length >= 10) data.OPENROUTER_API_KEY = orKey;
