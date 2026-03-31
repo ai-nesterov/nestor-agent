@@ -25,6 +25,7 @@ from ouroboros.task_results import (
     load_task_result,
     write_task_result,
 )
+from ouroboros.outcome import ALL_OUTCOME_CLASSES, OUTCOME_SOURCE_FALLBACK_SUPERVISOR
 
 # Lazy imports to avoid circular dependencies — everything comes through ctx
 
@@ -400,13 +401,20 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     # Track evolution task success/failure for circuit breaker
     if task_type == "evolution":
         st = ctx.load_state()
-        outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
+        canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
+        if canonical_outcome:
+            outcome, blocked_reason = canonical_outcome, canonical_reason
+            outcome_source = canonical_source or "rule"
+        else:
+            outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
+            outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),
             STATUS_COMPLETED,
             outcome_class=outcome,
             outcome_reason=blocked_reason,
+            outcome_source=outcome_source,
             cost_usd=float(evt.get("cost_usd", 0) or 0.0),
             total_rounds=int(evt.get("total_rounds") or 0),
             ts=evt.get("ts", ""),
@@ -438,6 +446,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     "task_id": task_id,
                     "consecutive_failures": failures,
                     "outcome": outcome,
+                    "source": outcome_source,
                 },
             )
 
@@ -449,16 +458,24 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "task_id": task_id,
                 "outcome": outcome,
                 "blocked_reason": blocked_reason,
+                "source": outcome_source,
             },
         )
     elif task_id:
-        outcome, blocked_reason = _classify_task_outcome(result_payload, evt)
+        canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
+        if canonical_outcome:
+            outcome, blocked_reason = canonical_outcome, canonical_reason
+            outcome_source = canonical_source or "rule"
+        else:
+            outcome, blocked_reason = _classify_task_outcome(result_payload, evt)
+            outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),
             STATUS_COMPLETED,
             outcome_class=outcome,
             outcome_reason=blocked_reason,
+            outcome_source=outcome_source,
             cost_usd=float(evt.get("cost_usd", 0) or 0.0),
             total_rounds=int(evt.get("total_rounds") or 0),
             ts=evt.get("ts", ""),
@@ -472,6 +489,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "task_type": task_type,
                 "outcome": outcome,
                 "reason": blocked_reason,
+                "source": outcome_source,
                 "caller_class": str((result_payload or {}).get("caller_class") or ""),
             },
         )
@@ -582,6 +600,29 @@ def _classify_evolution_outcome(
         return "no_actionable_goal", "status_only_or_reflection_only"
 
     return "failed", "empty_result"
+
+
+def _extract_canonical_outcome(
+    result_payload: Optional[Dict[str, Any]],
+) -> tuple[Optional[str], str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    outcome = str(payload.get("outcome_class") or "").strip().lower()
+    if outcome not in ALL_OUTCOME_CLASSES:
+        nested = payload.get("execution_outcome")
+        if isinstance(nested, dict):
+            outcome = str(nested.get("outcome_class") or "").strip().lower()
+            if outcome not in ALL_OUTCOME_CLASSES:
+                outcome = ""
+    if not outcome:
+        return None, "", ""
+
+    reason = str(payload.get("outcome_reason") or "").strip()
+    if not reason and isinstance(payload.get("execution_outcome"), dict):
+        reason = str(payload["execution_outcome"].get("outcome_reason") or "").strip()
+    source = str(payload.get("outcome_source") or "").strip().lower()
+    if not source and isinstance(payload.get("execution_outcome"), dict):
+        source = str(payload["execution_outcome"].get("outcome_source") or "").strip().lower()
+    return outcome, reason, source
 
 
 def _classify_task_outcome(
