@@ -1,4 +1,5 @@
 import json
+import datetime
 from types import SimpleNamespace
 
 
@@ -367,3 +368,171 @@ def test_classify_evolution_outcome_detects_status_only_cycle():
 
     assert outcome == "no_actionable_goal"
     assert reason == "status_only_or_reflection_only"
+
+
+def test_classify_task_outcome_detects_report_only_completion():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_task_outcome(
+        {
+            "result": "Planned to update VERSION and commit changes.",
+            "trace_summary": "## Tool trace (0 calls, 0 errors)\nNo tool calls.",
+        },
+        {"total_rounds": 1},
+    )
+
+    assert outcome == "report_only"
+    assert reason == "text_only_completion_without_tool_execution"
+
+
+def test_classify_task_outcome_detects_executed_work():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_task_outcome(
+        {
+            "result": "Patched and verified the target file.",
+            "trace_summary": "## Tool trace (4 calls, 0 errors)\n1. repo_read(path='a')\n2. str_replace_editor(path='a')",
+        },
+        {"total_rounds": 2},
+    )
+
+    assert outcome == "executed_work"
+    assert reason == ""
+
+
+def test_handle_schedule_task_blocks_repeated_consciousness_report_only_loops(tmp_path, monkeypatch):
+    from ouroboros.task_results import load_task_result, write_task_result
+    from supervisor import events as ev_module
+
+    desc = "Apply codex patch and commit dialogue fix"
+    for idx in range(3):
+        ts = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=idx + 1)
+        ).isoformat()
+        write_task_result(
+            tmp_path,
+            f"old{idx}",
+            "completed",
+            ts=ts,
+            description=desc,
+            task_type="task",
+            caller_class="consciousness",
+            outcome_class="report_only",
+            result="Outlined the patch and commit steps but did not call tools.",
+        )
+
+    monkeypatch.setattr(ev_module, "_find_duplicate_task", lambda *args, **kwargs: None)
+    monkeypatch.setenv("OUROBOROS_BG_REPORT_ONLY_REPEAT_LIMIT", "3")
+    monkeypatch.setenv("OUROBOROS_BG_REPORT_ONLY_COOLDOWN_SEC", "3600")
+    monkeypatch.setenv("OUROBOROS_BG_REPORT_ONLY_WINDOW_SEC", "7200")
+
+    class FakeCtx:
+        DRIVE_ROOT = tmp_path
+        PENDING = []
+        RUNNING = {}
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def send_with_budget(self, chat_id, text, **kwargs):
+            return None
+
+        def enqueue_task(self, task):
+            raise AssertionError("task should not be enqueued during cooldown")
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_schedule_task(
+        {
+            "type": "schedule_task",
+            "task_id": "new001",
+            "description": desc,
+            "depth": 1,
+            "task_type": "task",
+            "caller_class": "consciousness",
+        },
+        FakeCtx(),
+    )
+
+    payload = load_task_result(tmp_path, "new001")
+    assert payload is not None
+    assert payload["outcome_class"] == "blocked_external"
+    assert payload["outcome_reason"] == "consciousness_repeat_cooldown"
+
+
+def test_handle_schedule_task_allows_consciousness_retry_after_productive_outcome(tmp_path, monkeypatch):
+    from ouroboros.task_results import write_task_result
+    from supervisor import events as ev_module
+    from supervisor import queue as q_module
+
+    pending = []
+    running = {}
+    seq = {"value": 0}
+    q_module.init(tmp_path, soft_timeout=60, hard_timeout=120)
+    q_module.init_queue_refs(pending, running, seq)
+
+    desc = "Apply codex patch and commit dialogue fix"
+    write_task_result(
+        tmp_path,
+        "old-productive",
+        "completed",
+        ts=(
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)
+        ).isoformat(),
+        description=desc,
+        task_type="task",
+        caller_class="consciousness",
+        outcome_class="executed_work",
+        result="Patch applied with real tool calls.",
+    )
+
+    monkeypatch.setattr(ev_module, "_find_duplicate_task", lambda *args, **kwargs: None)
+
+    class FakeCtx:
+        DRIVE_ROOT = tmp_path
+        PENDING = pending
+        RUNNING = running
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def send_with_budget(self, chat_id, text, **kwargs):
+            return None
+
+        def enqueue_task(self, task):
+            return q_module.enqueue_task(task)
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_schedule_task(
+        {
+            "type": "schedule_task",
+            "task_id": "new002",
+            "description": desc,
+            "depth": 1,
+            "task_type": "task",
+            "caller_class": "consciousness",
+        },
+        FakeCtx(),
+    )
+
+    assert len(pending) == 1
+    assert pending[0]["id"] == "new002"

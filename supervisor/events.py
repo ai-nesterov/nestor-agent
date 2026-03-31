@@ -11,6 +11,7 @@ import datetime
 import json
 import logging
 import os
+import pathlib
 import re
 import sys
 import time
@@ -57,6 +58,8 @@ _BLOCKED_PATTERNS = (
     "soft limited",
     "hard blocked",
 )
+_PRODUCTIVE_TASK_OUTCOMES = {"executed_work", "scheduled_followup", "committed"}
+_NONPRODUCTIVE_TASK_OUTCOMES = {"report_only", "needs_owner_input", "blocked_external"}
 
 
 def _normalize_description(text: str) -> str:
@@ -392,12 +395,22 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     task_id = evt.get("task_id")
     task_type = str(evt.get("task_type") or "")
     wid = evt.get("worker_id")
+    result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
 
     # Track evolution task success/failure for circuit breaker
     if task_type == "evolution":
         st = ctx.load_state()
-        result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
         outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
+        write_task_result(
+            ctx.DRIVE_ROOT,
+            str(task_id or ""),
+            STATUS_COMPLETED,
+            outcome_class=outcome,
+            outcome_reason=blocked_reason,
+            cost_usd=float(evt.get("cost_usd", 0) or 0.0),
+            total_rounds=int(evt.get("total_rounds") or 0),
+            ts=evt.get("ts", ""),
+        )
         st["evolution_last_outcome"] = outcome
         st["evolution_last_outcome_at"] = evt.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat()
         st["evolution_blocked_reason"] = blocked_reason
@@ -436,6 +449,30 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "task_id": task_id,
                 "outcome": outcome,
                 "blocked_reason": blocked_reason,
+            },
+        )
+    elif task_id:
+        outcome, blocked_reason = _classify_task_outcome(result_payload, evt)
+        write_task_result(
+            ctx.DRIVE_ROOT,
+            str(task_id or ""),
+            STATUS_COMPLETED,
+            outcome_class=outcome,
+            outcome_reason=blocked_reason,
+            cost_usd=float(evt.get("cost_usd", 0) or 0.0),
+            total_rounds=int(evt.get("total_rounds") or 0),
+            ts=evt.get("ts", ""),
+        )
+        ctx.append_jsonl(
+            ctx.DRIVE_ROOT / "logs" / "supervisor.jsonl",
+            {
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "type": "task_outcome_classified",
+                "task_id": task_id,
+                "task_type": task_type,
+                "outcome": outcome,
+                "reason": blocked_reason,
+                "caller_class": str((result_payload or {}).get("caller_class") or ""),
             },
         )
 
@@ -545,6 +582,126 @@ def _classify_evolution_outcome(
         return "no_actionable_goal", "status_only_or_reflection_only"
 
     return "failed", "empty_result"
+
+
+def _classify_task_outcome(
+    result_payload: Optional[Dict[str, Any]],
+    evt: Dict[str, Any],
+) -> tuple[str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    result_text = str(payload.get("result") or "").strip()
+    trace_summary = str(payload.get("trace_summary") or "")
+    tool_calls, tool_errors = _trace_counts(trace_summary)
+    lowered = result_text.lower()
+    rounds = int(evt.get("total_rounds") or 0)
+
+    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
+        return "blocked_external", "provider_or_quota_block"
+
+    if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS):
+        return "needs_owner_input", "agent_requested_owner_direction"
+
+    if tool_calls > 0:
+        if "schedule_task(" in trace_summary or "wait_for_task(" in trace_summary:
+            return "scheduled_followup", ""
+        if "repo_commit(" in trace_summary:
+            return "committed", ""
+        return "executed_work", ""
+
+    if tool_errors > 0:
+        return "failed", "tool_errors_without_progress"
+
+    if result_text:
+        return "report_only", "text_only_completion_without_tool_execution"
+
+    if rounds == 0:
+        return "failed", "task_never_started"
+
+    return "failed", "empty_result"
+
+
+def _parse_result_ts(raw: Any) -> Optional[float]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(text).timestamp()
+    except Exception:
+        return None
+
+
+def _scan_recent_task_results(
+    drive_root: Any,
+    *,
+    limit: int = 80,
+    max_age_sec: int = 7200,
+) -> list[Dict[str, Any]]:
+    root = pathlib.Path(drive_root) / "task_results"
+    if not root.exists():
+        return []
+
+    now = time.time()
+    candidates = sorted(
+        root.glob("*.json"),
+        key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
+        reverse=True,
+    )[: max(1, int(limit))]
+
+    rows: list[Dict[str, Any]] = []
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        ts = _parse_result_ts(payload.get("ts")) or path.stat().st_mtime
+        if (now - ts) > float(max_age_sec):
+            continue
+        rows.append(payload)
+    return rows
+
+
+def _recent_consciousness_reschedule_block_reason(
+    drive_root: Any,
+    description: str,
+) -> str:
+    threshold = max(2, _int_env("OUROBOROS_BG_REPORT_ONLY_REPEAT_LIMIT", 3))
+    cooldown_sec = max(60, _int_env("OUROBOROS_BG_REPORT_ONLY_COOLDOWN_SEC", 1800))
+    window_sec = max(cooldown_sec, _int_env("OUROBOROS_BG_REPORT_ONLY_WINDOW_SEC", 7200))
+    normalized = _normalize_description(description)
+    if not normalized:
+        return ""
+
+    repeated = 0
+    newest_nonproductive_ts: Optional[float] = None
+    for payload in _scan_recent_task_results(drive_root, limit=120, max_age_sec=window_sec):
+        if str(payload.get("caller_class") or "").strip().lower() != "consciousness":
+            continue
+        if str(payload.get("task_type") or payload.get("type") or "").strip().lower() != "task":
+            continue
+        if _normalize_description(payload.get("description") or "") != normalized:
+            continue
+        outcome = str(payload.get("outcome_class") or "").strip().lower()
+        if outcome in _PRODUCTIVE_TASK_OUTCOMES:
+            return ""
+        if outcome not in _NONPRODUCTIVE_TASK_OUTCOMES:
+            continue
+        repeated += 1
+        newest_nonproductive_ts = newest_nonproductive_ts or (
+            _parse_result_ts(payload.get("ts")) or time.time()
+        )
+        if repeated >= threshold:
+            break
+
+    if repeated < threshold or newest_nonproductive_ts is None:
+        return ""
+    if (time.time() - newest_nonproductive_ts) >= cooldown_sec:
+        return ""
+    return (
+        f"Background consciousness cooldown: '{description[:80]}' already produced "
+        f"{repeated} non-productive completions in the last {window_sec // 60} minutes."
+    )
 
 
 def _handle_review_request(evt: Dict[str, Any], ctx: Any) -> None:
@@ -740,6 +897,45 @@ def _handle_schedule_task(evt: Dict[str, Any], ctx: Any) -> None:
         if owner_chat_id:
             ctx.send_with_budget(int(owner_chat_id), f"⚠️ Task rejected: subtask depth limit (3) exceeded")
         return
+
+    if caller_class == "consciousness" and task_type == "task" and desc:
+        cooldown_reason = _recent_consciousness_reschedule_block_reason(ctx.DRIVE_ROOT, desc)
+        if cooldown_reason:
+            write_task_result(
+                ctx.DRIVE_ROOT,
+                tid,
+                STATUS_COMPLETED,
+                description=desc,
+                context=task_context,
+                executor=executor,
+                repo_scope=repo_scope,
+                constraints=constraints,
+                artifact_policy=artifact_policy,
+                quota_class=quota_class,
+                priority=priority,
+                task_type=task_type,
+                task_kind=task_kind,
+                caller_class=caller_class,
+                model_policy=model_policy,
+                model_override=model_override,
+                importance=importance,
+                defer_on_quota=defer_on_quota,
+                budget_decision=budget_decision,
+                result=cooldown_reason,
+                outcome_class="blocked_external",
+                outcome_reason="consciousness_repeat_cooldown",
+            )
+            ctx.append_jsonl(
+                ctx.DRIVE_ROOT / "logs" / "supervisor.jsonl",
+                {
+                    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "type": "consciousness_schedule_cooldown",
+                    "task_id": tid,
+                    "description": desc[:200],
+                    "reason": cooldown_reason,
+                },
+            )
+            return
 
     if owner_chat_id and desc:
         admission_error = _admission_check_external_executor(
