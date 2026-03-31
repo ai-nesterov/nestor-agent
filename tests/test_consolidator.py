@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from ouroboros.consolidator import (
     should_consolidate,
     consolidate,
+    consolidate_scratchpad,
     migrate_dialogue_summary_to_blocks,
     resolve_consolidation_model,
     CONSOLIDATION_MODEL,
@@ -193,3 +194,87 @@ def test_resolve_consolidation_model_uses_default_when_unset(monkeypatch):
     monkeypatch.delenv("OUROBOROS_MODEL_LIGHT", raising=False)
     monkeypatch.delenv("OUROBOROS_MODEL", raising=False)
     assert resolve_consolidation_model() == CONSOLIDATION_MODEL
+
+
+def test_consolidate_scratchpad_blocks_parses_minimax_think_json(tmp_path, monkeypatch):
+    import ouroboros.consolidator as consolidator_mod
+
+    class FakeMemory:
+        def __init__(self, root):
+            self.root = root
+            self.blocks_path = root / "scratchpad_blocks.json"
+            self.blocks = [
+                {"ts": "2026-03-31T10:00:00Z", "source": "task", "content": "A" * 80},
+                {"ts": "2026-03-31T10:10:00Z", "source": "task", "content": "B" * 80},
+                {"ts": "2026-03-31T10:20:00Z", "source": "task", "content": "C" * 80},
+            ]
+            self.blocks_path.write_text(json.dumps(self.blocks), encoding="utf-8")
+
+        def load_scratchpad_blocks(self):
+            return list(self.blocks)
+
+        def scratchpad_blocks_path(self):
+            return self.blocks_path
+
+        def scratchpad_path(self):
+            return self.root / "scratchpad.md"
+
+        def regenerate_scratchpad_md(self):
+            return None
+
+    monkeypatch.setattr(consolidator_mod, "SCRATCHPAD_CONSOLIDATION_THRESHOLD", 10)
+    memory = FakeMemory(tmp_path)
+    knowledge_dir = tmp_path / "knowledge"
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = (
+        {
+            "content": (
+                "<think>compress carefully</think>\n```json\n"
+                "{\"knowledge_entries\": [{\"topic\": \"pattern\", \"content\": \"learned\"}], "
+                "\"compressed_block\": \"compressed summary\"}\n```"
+            )
+        },
+        {"cost": 0.01},
+    )
+
+    usage = consolidate_scratchpad(memory, knowledge_dir, mock_llm, identity_text="")
+
+    assert usage == {"cost": 0.01}
+    saved_blocks = json.loads(memory.blocks_path.read_text(encoding="utf-8"))
+    assert saved_blocks[0]["content"] == "compressed summary"
+    assert (knowledge_dir / "pattern.md").exists()
+
+
+def test_consolidate_scratchpad_flat_parses_minimax_think_json(tmp_path, monkeypatch):
+    import ouroboros.consolidator as consolidator_mod
+
+    class FakeMemory:
+        def __init__(self, root):
+            self.root = root
+            self._scratchpad_path = root / "scratchpad.md"
+            self._scratchpad_path.write_text("X" * 100, encoding="utf-8")
+
+        def load_scratchpad_blocks(self):
+            return []
+
+        def scratchpad_path(self):
+            return self._scratchpad_path
+
+    monkeypatch.setattr(consolidator_mod, "SCRATCHPAD_CONSOLIDATION_THRESHOLD", 10)
+    memory = FakeMemory(tmp_path)
+    knowledge_dir = tmp_path / "knowledge"
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = (
+        {
+            "content": (
+                "<think>compress carefully</think>\n"
+                "{\"knowledge_entries\": [], \"compressed_scratchpad\": \"short scratchpad\"}"
+            )
+        },
+        {"cost": 0.02},
+    )
+
+    usage = consolidate_scratchpad(memory, knowledge_dir, mock_llm, identity_text="")
+
+    assert usage == {"cost": 0.02}
+    assert memory.scratchpad_path().read_text(encoding="utf-8") == "short scratchpad"

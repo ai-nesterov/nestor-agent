@@ -21,6 +21,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from ouroboros.utils import utc_now_iso, read_text, write_text
+from ouroboros.structured_output import extract_json_object
 
 if sys.platform == "win32":
     import msvcrt
@@ -672,11 +673,9 @@ Respond with JSON only (no fences):
             reasoning_effort="low",
             max_tokens=4096,
         )
-        raw = (msg.get("content") or "").strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-        result = json.loads(raw)
+        result = extract_json_object(msg.get("content") or "")
+        if result is None:
+            raise ValueError("consolidation response did not contain a JSON object")
 
         compressed_text = result.get("compressed_block", "")
         if not compressed_text or not compressed_text.strip():
@@ -777,11 +776,9 @@ Respond with JSON only (no fences):
             reasoning_effort="low",
             max_tokens=4096,
         )
-        raw = (msg.get("content") or "").strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-        result = json.loads(raw)
+        result = extract_json_object(msg.get("content") or "")
+        if result is None:
+            raise ValueError("consolidation response did not contain a JSON object")
 
         compressed = result.get("compressed_scratchpad", "")
         if not compressed or not compressed.strip():
