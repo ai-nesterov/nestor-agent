@@ -574,6 +574,8 @@ def _handle_task_metrics(evt: Dict[str, Any], ctx: Any) -> None:
             "duration_sec": round(float(evt.get("duration_sec") or 0.0), 3),
             "tool_calls": int(evt.get("tool_calls") or 0),
             "tool_errors": int(evt.get("tool_errors") or 0),
+            "outcome_class": str(evt.get("outcome_class") or ""),
+            "outcome_source": str(evt.get("outcome_source") or ""),
         },
     )
 

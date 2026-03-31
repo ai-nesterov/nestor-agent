@@ -94,6 +94,8 @@ def emit_task_results(
 ) -> None:
     """Emit all end-of-task events to supervisor and run post-task processing."""
     task_type = str(task.get("type") or "").lower()
+    effective_outcome = execution_outcome or {}
+    facts = llm_trace.get("execution_facts") if isinstance(llm_trace, dict) else {}
     
     # Special handling for Telegram messages (check for _telegram_chat_id marker)
     telegram_chat_id = task.get("_telegram_chat_id")
@@ -144,6 +146,8 @@ def emit_task_results(
         "task_id": task.get("id"), "task_type": task.get("type"),
         "duration_sec": duration_sec,
         "tool_calls": n_tool_calls, "tool_errors": n_tool_errors,
+        "outcome_class": str(effective_outcome.get("outcome_class") or ""),
+        "outcome_source": str(effective_outcome.get("outcome_source") or ""),
         "cost_usd": round(float(usage.get("cost") or 0), 6),
         "prompt_tokens": int(usage.get("prompt_tokens") or 0),
         "completion_tokens": int(usage.get("completion_tokens") or 0),
@@ -159,6 +163,8 @@ def emit_task_results(
         "total_rounds": int(usage.get("rounds") or 0),
         "prompt_tokens": int(usage.get("prompt_tokens") or 0),
         "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "outcome_class": str(effective_outcome.get("outcome_class") or ""),
+        "outcome_source": str(effective_outcome.get("outcome_source") or ""),
         "ts": utc_now_iso(),
     })
     append_jsonl(drive_logs / "events.jsonl", {
@@ -170,6 +176,25 @@ def emit_task_results(
         "total_rounds": int(usage.get("rounds") or 0),
         "prompt_tokens": int(usage.get("prompt_tokens") or 0),
         "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "outcome_class": str(effective_outcome.get("outcome_class") or ""),
+        "outcome_source": str(effective_outcome.get("outcome_source") or ""),
+    })
+    append_jsonl(drive_logs / "events.jsonl", {
+        "ts": utc_now_iso(),
+        "type": "task_outcome",
+        "task_id": task.get("id"),
+        "task_type": task.get("type"),
+        "outcome_class": str(effective_outcome.get("outcome_class") or ""),
+        "outcome_reason": str(effective_outcome.get("outcome_reason") or ""),
+        "outcome_source": str(effective_outcome.get("outcome_source") or ""),
+        "productive": bool(effective_outcome.get("productive")),
+        "execution_facts_summary": {
+            "tool_calls_total": int((facts or {}).get("tool_calls_total") or 0),
+            "tool_errors_total": int((facts or {}).get("tool_errors_total") or 0),
+            "write_ops_total": int((facts or {}).get("write_ops_total") or 0),
+            "scheduled_task_calls": int((facts or {}).get("scheduled_task_calls") or 0),
+            "repo_commit_calls": int((facts or {}).get("repo_commit_calls") or 0),
+        },
     })
 
     _store_task_result(env, task, text, usage, llm_trace, execution_outcome)
