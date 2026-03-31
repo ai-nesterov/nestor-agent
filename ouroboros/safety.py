@@ -168,16 +168,19 @@ def check_safety(
                 )
             _eq = getattr(ctx, "event_queue", None) if ctx is not None else None
             if _eq is not None:
+                cloud_provider = "local" if _use_local_light else client.cloud_provider()
                 emit_llm_usage_event(
                     _eq,
                     getattr(ctx, "task_id", "") if ctx is not None else "",
                     model_name, usage, cost,
                     category="safety",
-                    provider="local" if _use_local_light else "openrouter",
+                    provider=cloud_provider,
                     source="safety_light",
                 )
             else:
-                update_budget_from_usage(usage)
+                provider_usage = dict(usage)
+                provider_usage["provider"] = "local" if _use_local_light else client.cloud_provider()
+                update_budget_from_usage(provider_usage)
 
         result = _parse_safety_response(msg.get("content") or "")
         if result:
@@ -227,16 +230,19 @@ def check_safety(
                 )
             _eq = getattr(ctx, "event_queue", None) if ctx is not None else None
             if _eq is not None:
+                cloud_provider = "local" if _use_local_code else client.cloud_provider()
                 emit_llm_usage_event(
                     _eq,
                     getattr(ctx, "task_id", "") if ctx is not None else "",
                     model_name, usage, cost,
                     category="safety",
-                    provider="local" if _use_local_code else "openrouter",
+                    provider=cloud_provider,
                     source="safety_deep",
                 )
             else:
-                update_budget_from_usage(usage)
+                provider_usage = dict(usage)
+                provider_usage["provider"] = "local" if _use_local_code else client.cloud_provider()
+                update_budget_from_usage(provider_usage)
 
         result = _parse_safety_response(msg.get("content") or "")
         if result is None:

@@ -162,18 +162,19 @@ async def _multi_model_review_async(content: str, prompt: str,
     if len(models) > MAX_MODELS:
         return {"error": f"Too many models ({len(models)}). Maximum is {MAX_MODELS}."}
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not _cfg.has_openrouter_config():
+    provider = _cfg.get_cloud_provider()
+    api_key = os.environ.get("MINIMAX_API_KEY", "") if provider == "minimax" else os.environ.get("OPENROUTER_API_KEY", "")
+    if not _cfg.has_cloud_provider_config():
         if _cfg.has_local_model_config():
             return {
                 "error": (
                     "Cloud LLM backend is not configured for review. "
-                    "Multi-model review currently requires OpenRouter-compatible cloud access."
+                    "Multi-model review currently requires cloud access."
                 )
             }
         return {
             "error": (
-                "No LLM provider configured. Configure OpenRouter API key "
+                "No LLM provider configured. Configure a cloud provider API key "
                 "or local model backend."
             )
         }
@@ -198,7 +199,7 @@ async def _multi_model_review_async(content: str, prompt: str,
     ]
 
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-    llm_client = LLMClient(api_key=api_key)
+    llm_client = LLMClient(api_key=api_key, provider=provider)
     tasks = [_query_model(llm_client, m, messages, semaphore) for m in models]
     results = await asyncio.gather(*tasks)
 
@@ -286,7 +287,7 @@ def _emit_usage_event(review_result: dict, ctx: ToolContext) -> None:
             "cache_write_tokens": review_result.get("cache_write_tokens", 0),
             "cost": review_result["cost_estimate"],
         },
-        "provider": "openrouter",
+        "provider": _cfg.get_cloud_provider(),
         "source": "review",
         "category": "review",
     }

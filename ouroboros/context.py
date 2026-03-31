@@ -15,6 +15,7 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
+from ouroboros.config import get_cloud_provider
 from ouroboros.utils import (
     utc_now_iso, read_text, estimate_tokens, get_git_info,
 )
@@ -352,6 +353,9 @@ def _append_budget_drift_checks(env: Any, checks: List[str]) -> None:
     try:
         state_json = read_text(env.drive_path("state/state.json"))
         state_data = json.loads(state_json)
+        if get_cloud_provider() != "openrouter":
+            checks.append("INFO: budget drift check is disabled for non-OpenRouter cloud providers")
+            return
         if state_data.get("budget_drift_alert"):
             drift_pct = state_data.get("budget_drift_pct", 0)
             our = state_data.get("spent_usd", 0)

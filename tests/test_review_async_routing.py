@@ -47,3 +47,40 @@ def test_multi_model_review_async_uses_llm_client_chat_async(monkeypatch, tmp_pa
     assert ctx.pending_events
     assert ctx.pending_events[0]["usage"]["cached_tokens"] == 7
     assert ctx.pending_events[0]["usage"]["cache_write_tokens"] == 2
+
+
+def test_multi_model_review_async_supports_minimax_provider(monkeypatch, tmp_path):
+    from ouroboros.tools.registry import ToolContext
+    from ouroboros.tools import review as review_module
+
+    init_kwargs = []
+
+    class FakeLLMClient:
+        def __init__(self, *args, **kwargs):
+            init_kwargs.append(kwargs)
+
+        async def chat_async(self, **kwargs):
+            return (
+                {"content": '[{"item":"check","verdict":"PASS","severity":"advisory","reason":"ok"}]'},
+                {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0},
+            )
+
+    monkeypatch.setenv("LLM_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "minimax-key")
+    monkeypatch.setattr(review_module, "LLMClient", FakeLLMClient)
+    monkeypatch.setattr(review_module, "_load_bible", lambda: "Bible")
+
+    ctx = ToolContext(repo_dir=pathlib.Path(tmp_path), drive_root=pathlib.Path(tmp_path))
+    asyncio.run(
+        review_module._multi_model_review_async(
+            "review target",
+            "review instructions",
+            ["MiniMax-M2.7"],
+            ctx,
+        )
+    )
+
+    assert init_kwargs
+    assert init_kwargs[0]["api_key"] == "minimax-key"
+    assert init_kwargs[0]["provider"] == "minimax"
+    assert ctx.pending_events[0]["provider"] == "minimax"

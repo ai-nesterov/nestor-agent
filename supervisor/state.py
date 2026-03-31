@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from ouroboros.config import resolve_openrouter_base_url
+from ouroboros.config import get_cloud_provider, resolve_openrouter_base_url
 
 log = logging.getLogger(__name__)
 
@@ -235,15 +235,17 @@ def init_state() -> Dict[str, Any]:
         st["session_spent_snapshot"] = float(st.get("spent_usd") or 0.0)
 
         # Fetch OpenRouter ground truth to capture total_usd baseline
-        ground_truth = check_openrouter_ground_truth()
-        if ground_truth is not None:
-            st["session_total_snapshot"] = ground_truth["total_usd"]
-            st["openrouter_total_usd"] = ground_truth["total_usd"]
-            st["openrouter_daily_usd"] = ground_truth["daily_usd"]
-            st["openrouter_last_check_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        if get_cloud_provider() == "openrouter":
+            ground_truth = check_openrouter_ground_truth()
+            if ground_truth is not None:
+                st["session_total_snapshot"] = ground_truth["total_usd"]
+                st["openrouter_total_usd"] = ground_truth["total_usd"]
+                st["openrouter_daily_usd"] = ground_truth["daily_usd"]
+                st["openrouter_last_check_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            else:
+                st["session_total_snapshot"] = 0.0
         else:
-            # If we can't fetch ground truth, use 0 as baseline
-            st["session_total_snapshot"] = 0.0
+            st["session_total_snapshot"] = None
 
         # Reset drift tracking
         st["budget_drift_pct"] = None

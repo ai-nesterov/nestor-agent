@@ -233,12 +233,13 @@ class LLMClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        provider: Optional[str] = None,
     ):
         self._api_key_override = api_key
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         self._base_url_override = base_url
         self._base_url = resolve_openrouter_base_url(base_url)
-        self._provider_override: Optional[str] = None
+        self._provider_override: Optional[str] = str(provider).strip().lower() if provider else None
         self._client = None
         self._client_api_key: Optional[str] = None
         self._client_base_url: Optional[str] = None

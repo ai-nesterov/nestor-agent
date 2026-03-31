@@ -258,7 +258,7 @@ class BackgroundConsciousness:
 
                 # Report usage to supervisor
                 if self._event_queue is not None:
-                    provider = "local" if _use_local_light else "openrouter"
+                    provider = "local" if _use_local_light else self._llm.cloud_provider()
                     model_name = f"{model} (local)" if _use_local_light else model
                     self._event_queue.put({
                         "type": "llm_usage",
