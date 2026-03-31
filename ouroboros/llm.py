@@ -51,6 +51,9 @@ def _estimate_message_chars(messages: List[Dict[str, Any]]) -> int:
     return total
 
 
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
 def _split_markdown_sections(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     lines = str(text or "").splitlines()
     preamble: List[str] = []
@@ -686,7 +689,7 @@ class LLMClient:
             msg = self._parse_tool_calls_from_content(msg, allowed_tool_names)
 
         usage["cost"] = 0.0
-        return msg, usage
+        return self._postprocess_response_message("local", msg), usage
 
     @staticmethod
     def _extract_local_error_text(response: Any) -> str:
@@ -1113,6 +1116,65 @@ class LLMClient:
 
         return msg, usage
 
+    @staticmethod
+    def _extract_reasoning_from_text(text: Any) -> Tuple[str, str]:
+        raw = str(text or "")
+        if not raw:
+            return "", ""
+
+        reasoning_chunks: List[str] = []
+
+        def _collect(match: re.Match[str]) -> str:
+            matched = match.group(0)
+            body = re.sub(r"^<think\b[^>]*>", "", matched, flags=re.IGNORECASE)
+            body = re.sub(r"</think>$", "", body, flags=re.IGNORECASE).strip()
+            if body:
+                reasoning_chunks.append(body)
+            return ""
+
+        cleaned = _THINK_BLOCK_RE.sub(_collect, raw)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        reasoning = "\n\n".join(chunk for chunk in reasoning_chunks if chunk).strip()
+        return cleaned, reasoning
+
+    def _postprocess_response_message(
+        self,
+        provider: str,
+        msg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        processed = copy.deepcopy(msg or {})
+        raw_content = processed.get("content")
+        reasoning = ""
+
+        if isinstance(raw_content, str):
+            cleaned_content, reasoning = self._extract_reasoning_from_text(raw_content)
+            processed["content"] = cleaned_content
+        elif isinstance(raw_content, list):
+            cleaned_blocks: List[Any] = []
+            reasoning_chunks: List[str] = []
+            for block in raw_content:
+                if not isinstance(block, dict):
+                    cleaned_blocks.append(block)
+                    continue
+                if block.get("type") != "text":
+                    cleaned_blocks.append(copy.deepcopy(block))
+                    continue
+                cleaned_text, block_reasoning = self._extract_reasoning_from_text(block.get("text", ""))
+                updated = copy.deepcopy(block)
+                updated["text"] = cleaned_text
+                cleaned_blocks.append(updated)
+                if block_reasoning:
+                    reasoning_chunks.append(block_reasoning)
+            processed["content"] = cleaned_blocks
+            reasoning = "\n\n".join(chunk for chunk in reasoning_chunks if chunk).strip()
+
+        if raw_content != processed.get("content"):
+            processed["raw_content"] = raw_content
+        if reasoning:
+            processed["reasoning"] = reasoning
+        processed["provider"] = provider
+        return processed
+
     def _normalize_cloud_response(
         self,
         provider: str,
@@ -1122,8 +1184,9 @@ class LLMClient:
             usage = resp_dict.get("usage") or {}
             choices = resp_dict.get("choices") or [{}]
             msg = (choices[0] if choices else {}).get("message") or {}
-            return msg, usage
-        return self._normalize_openrouter_response(resp_dict)
+            return self._postprocess_response_message(provider, msg), usage
+        msg, usage = self._normalize_openrouter_response(resp_dict)
+        return self._postprocess_response_message(provider, msg), usage
 
     def _chat_cloud(
         self,

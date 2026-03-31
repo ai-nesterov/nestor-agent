@@ -592,3 +592,37 @@ class TestLlmClientRefresh(unittest.TestCase):
                     "MiniMax-M2.1-highspeed",
                 ],
             )
+
+    def test_postprocess_response_message_extracts_think_reasoning(self):
+        from ouroboros.llm import LLMClient
+
+        client = LLMClient()
+        msg = client._postprocess_response_message(
+            "minimax",
+            {"role": "assistant", "content": "<think>hidden chain</think>\n```json\n{\"ok\": true}\n```"},
+        )
+
+        self.assertEqual(msg["content"], "```json\n{\"ok\": true}\n```")
+        self.assertEqual(msg["reasoning"], "hidden chain")
+        self.assertEqual(msg["raw_content"], "<think>hidden chain</think>\n```json\n{\"ok\": true}\n```")
+        self.assertEqual(msg["provider"], "minimax")
+
+    def test_postprocess_response_message_handles_text_blocks(self):
+        from ouroboros.llm import LLMClient
+
+        client = LLMClient()
+        msg = client._postprocess_response_message(
+            "minimax",
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "<think>step one</think>\nVisible"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/x.png"}},
+                ],
+            },
+        )
+
+        self.assertEqual(msg["content"][0]["text"], "Visible")
+        self.assertEqual(msg["reasoning"], "step one")
+        self.assertEqual(msg["provider"], "minimax")
+        self.assertIn("raw_content", msg)
