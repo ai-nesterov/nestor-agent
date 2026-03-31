@@ -10,7 +10,7 @@ import pathlib
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from ouroboros.config import use_local_for_lane
+from ouroboros.config import get_lane_model, use_local_for_lane
 from ouroboros.tools.registry import ToolContext, ToolEntry
 from ouroboros.utils import read_text, safe_relpath, utc_now_iso
 
@@ -308,13 +308,12 @@ Now write a comprehensive summary:"""
 
         # Call LLM
         llm = LLMClient()
-        model = os.environ.get("OUROBOROS_MODEL_LIGHT", "") or DEFAULT_LIGHT_MODEL
+        _use_local_light = use_local_for_lane("LIGHT")
+        model = get_lane_model("LIGHT", prefer_local=_use_local_light) or DEFAULT_LIGHT_MODEL
 
         messages = [
             {"role": "user", "content": prompt}
         ]
-
-        _use_local_light = use_local_for_lane("LIGHT")
         response, usage = llm.chat(
             messages=messages,
             model=model,

@@ -32,7 +32,7 @@ from ouroboros.utils import (
     utc_now_iso, read_text, append_jsonl, clip_text,
     truncate_for_log, sanitize_tool_result_for_log, sanitize_tool_args_for_log,
 )
-from ouroboros.config import resolve_effort, use_local_for_lane
+from ouroboros.config import get_lane_model, resolve_effort, use_local_for_lane
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.memory import Memory
 from ouroboros.context import (
@@ -90,7 +90,8 @@ class BackgroundConsciousness:
 
     @property
     def _model(self) -> str:
-        return os.environ.get("OUROBOROS_MODEL_LIGHT", "") or DEFAULT_LIGHT_MODEL
+        use_local_light = use_local_for_lane("LIGHT")
+        return get_lane_model("LIGHT", prefer_local=use_local_light) or DEFAULT_LIGHT_MODEL
 
     def start(self) -> str:
         if self.is_running:

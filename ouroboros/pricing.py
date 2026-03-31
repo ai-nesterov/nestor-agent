@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import logging
 
+from ouroboros.config import get_cloud_provider
 from ouroboros.utils import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -172,7 +173,12 @@ def emit_llm_usage_event(
     if not event_queue:
         return
     try:
-        resolved_provider = provider or ("local" if str(model or "").endswith(" (local)") else "openrouter")
+        if provider:
+            resolved_provider = provider
+        elif str(model or "").endswith(" (local)"):
+            resolved_provider = "local"
+        else:
+            resolved_provider = get_cloud_provider()
         event_queue.put_nowait({
             "type": "llm_usage",
             "ts": utc_now_iso(),

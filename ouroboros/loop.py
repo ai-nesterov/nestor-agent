@@ -19,7 +19,7 @@ from ouroboros.tool_policy import initial_tool_schemas, list_non_core_tools
 from ouroboros.tools.registry import ToolRegistry
 from ouroboros.context_compaction import compact_tool_history_llm
 from ouroboros.utils import estimate_tokens
-from ouroboros.config import use_local_for_lane
+from ouroboros.config import get_lane_model, use_local_for_lane
 
 from ouroboros.loop_tool_execution import (
     StatefulToolExecutor,
@@ -270,7 +270,7 @@ def run_llm_loop(
 
     Returns: (final_text, accumulated_usage, llm_trace)
     """
-    active_model = llm.default_model()
+    active_model = get_lane_model("MAIN")
     active_effort = initial_effort
     active_use_local = use_local_for_lane("MAIN")
 
@@ -348,7 +348,7 @@ def run_llm_loop(
                 tools._ctx.messages = messages
             if _compaction_usage:
                 add_usage(accumulated_usage, _compaction_usage)
-                _cm = os.environ.get("OUROBOROS_MODEL_LIGHT") or "anthropic/claude-sonnet-4.6"
+                _cm = get_lane_model("LIGHT", prefer_local=False) or "anthropic/claude-sonnet-4.6"
                 _cc = float(_compaction_usage.get("cost") or 0) or estimate_cost(
                     _cm, int(_compaction_usage.get("prompt_tokens") or 0),
                     int(_compaction_usage.get("completion_tokens") or 0),
@@ -365,7 +365,7 @@ def run_llm_loop(
                 active_effort = _pre_checkpoint_effort
 
             if msg is None:
-                fallback_model = os.environ.get("OUROBOROS_MODEL_FALLBACK", "").strip()
+                fallback_model = get_lane_model("FALLBACK", prefer_local=False).strip()
                 if not fallback_model or fallback_model == active_model:
                     local_tag = " (local)" if active_use_local else ""
                     return (
@@ -375,6 +375,8 @@ def run_llm_loop(
                     ), accumulated_usage, llm_trace
 
                 fallback_use_local = use_local_for_lane("FALLBACK")
+                if fallback_use_local:
+                    fallback_model = get_lane_model("FALLBACK", prefer_local=True).strip()
                 primary_tag = " (local)" if active_use_local else ""
                 fallback_tag = " (local)" if fallback_use_local else ""
                 emit_progress(f"⚡ Fallback: {active_model}{primary_tag} → {fallback_model}{fallback_tag} after empty response")

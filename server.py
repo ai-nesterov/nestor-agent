@@ -933,7 +933,7 @@ async def api_cost_breakdown(request: Request) -> JSONResponse:
                         continue
                     cost = float(evt.get("cost") or 0)
                     model = str(evt.get("model") or "unknown")
-                    api_key_type = str(evt.get("api_key_type") or evt.get("provider") or "openrouter")
+                    api_key_type = str(evt.get("api_key_type") or evt.get("provider") or "unknown")
                     model_cat = str(evt.get("model_category") or "other")
                     task_cat = str(evt.get("category") or "task")
 

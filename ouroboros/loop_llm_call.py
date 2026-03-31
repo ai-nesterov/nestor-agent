@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import logging
 
+from ouroboros.config import get_cloud_provider
 from ouroboros.llm import LLMClient, LocalContextTooLargeError, add_usage
 from ouroboros.pricing import emit_llm_usage_event, estimate_cost, infer_model_category
 from ouroboros.utils import utc_now_iso, append_jsonl
@@ -82,7 +83,7 @@ def call_llm_with_retry(
 
             cost = float(usage.get("cost") or 0)
             display_model = model
-            provider = "local" if use_local else str(getattr(llm, "cloud_provider", lambda: "openrouter")())
+            provider = "local" if use_local else str(getattr(llm, "cloud_provider", lambda: get_cloud_provider())())
             if use_local:
                 cost = 0.0
                 display_model = f"{model} (local)"

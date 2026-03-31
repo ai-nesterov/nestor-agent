@@ -4,10 +4,12 @@ from ouroboros.config import (
     SETTINGS_DEFAULTS,
     apply_settings_to_env,
     get_cloud_provider,
+    get_lane_model,
     resolve_effort,
     get_review_models,
     get_review_enforcement,
     get_review_executor,
+    has_cloud_provider_config,
     has_openrouter_config,
     has_minimax_config,
     has_local_model_config,
@@ -325,6 +327,21 @@ def test_llm_backend_scenario_c_both_configured_defaults_to_cloud_unless_explici
     assert use_local_for_lane("MAIN", settings) is True
 
 
+def test_minimax_selected_does_not_auto_fallback_to_local_when_minimax_is_configured():
+    settings = {
+        "LLM_PROVIDER": "minimax",
+        "OPENROUTER_API_KEY": "",
+        "MINIMAX_API_KEY": "minimax-123",
+        "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert has_cloud_provider_config(settings) is True
+    assert has_local_model_config(settings) is True
+    assert use_local_for_lane("MAIN", settings) is False
+
+
 def test_llm_backend_scenario_d_none_configured():
     settings = {
         "OPENROUTER_API_KEY": "",
@@ -336,3 +353,21 @@ def test_llm_backend_scenario_d_none_configured():
     assert has_openrouter_config(settings) is False
     assert has_local_model_config(settings) is False
     assert has_configured_llm_backend(settings) is False
+
+
+def test_get_lane_model_uses_local_override_for_local_lane():
+    settings = {
+        "OUROBOROS_MODEL": "MiniMax-M2.5",
+        "LOCAL_MODEL_MAIN": "Qwen/Qwen3.5-27B",
+        "USE_LOCAL_MAIN": True,
+    }
+    assert get_lane_model("MAIN", settings) == "Qwen/Qwen3.5-27B"
+
+
+def test_get_lane_model_falls_back_to_cloud_model_when_local_override_missing():
+    settings = {
+        "OUROBOROS_MODEL_FALLBACK": "MiniMax-M2.1",
+        "LOCAL_MODEL_FALLBACK": "",
+        "USE_LOCAL_FALLBACK": True,
+    }
+    assert get_lane_model("FALLBACK", settings) == "MiniMax-M2.1"

@@ -159,6 +159,21 @@ class TestEmitLlmUsageEvent:
         assert event["provider"] == "minimax"
         assert event["api_key_type"] == "minimax"
 
+    def test_emits_selected_cloud_provider_by_default(self):
+        q = queue.Queue()
+        with patch.dict(os.environ, {"LLM_PROVIDER": "minimax"}, clear=False):
+            emit_llm_usage_event(
+                event_queue=q,
+                task_id="test-123",
+                model="MiniMax-M2.7",
+                usage={"prompt_tokens": 1000, "completion_tokens": 500},
+                cost=0.0,
+                category="task",
+            )
+        event = q.get_nowait()
+        assert event["provider"] == "minimax"
+        assert event["api_key_type"] == "minimax"
+
     def test_none_queue_no_error(self):
         # Should silently do nothing
         emit_llm_usage_event(None, "t", "m", {}, 0.0)

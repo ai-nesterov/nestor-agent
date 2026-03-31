@@ -278,6 +278,7 @@ class TestLlmClientRefresh(unittest.TestCase):
                 {
                     "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
                     "OUROBOROS_MODEL": "Qwen/Qwen3.5-27B",
+                    "LOCAL_MODEL_MAIN": "Qwen/Qwen3-Coder-Next",
                 },
                 clear=False,
             ):
@@ -294,7 +295,7 @@ class TestLlmClientRefresh(unittest.TestCase):
             _FakeRequests.post_models,
             [
                 ("http://localhost:1234/v1/chat/completions", "google/gemini-3-flash-preview"),
-                ("http://localhost:1234/v1/chat/completions", "Qwen/Qwen3.5-27B"),
+                ("http://localhost:1234/v1/chat/completions", "Qwen/Qwen3-Coder-Next"),
             ],
         )
 
@@ -558,3 +559,36 @@ class TestLlmClientRefresh(unittest.TestCase):
         self.assertEqual(roles, ["system", "user", "assistant", "user"])
         self.assertIn("global", payload_messages[0].get("content", ""))
         self.assertIn("late-system", payload_messages[0].get("content", ""))
+
+    def test_available_models_uses_local_lane_model_ids(self):
+        from ouroboros.llm import LLMClient
+
+        with patch.dict(
+            os.environ,
+            {
+                "OUROBOROS_MODEL": "MiniMax-M2.5",
+                "OUROBOROS_MODEL_CODE": "MiniMax-M2.5",
+                "OUROBOROS_MODEL_LIGHT": "MiniMax-M2.1-highspeed",
+                "OUROBOROS_MODEL_FALLBACK": "MiniMax-M2.1",
+                "LOCAL_MODEL_MAIN": "Qwen/Qwen3.5-27B",
+                "LOCAL_MODEL_CODE": "Qwen/Qwen3-Coder-Next",
+                "LOCAL_MODEL_LIGHT": "Qwen/Qwen3.5-27B",
+                "LOCAL_MODEL_FALLBACK": "Qwen/Qwen3.5-27B",
+                "USE_LOCAL_MAIN": "True",
+                "USE_LOCAL_CODE": "True",
+                "USE_LOCAL_LIGHT": "False",
+                "USE_LOCAL_FALLBACK": "True",
+                "MINIMAX_API_KEY": "minimax-key",
+                "LLM_PROVIDER": "minimax",
+            },
+            clear=False,
+        ):
+            client = LLMClient()
+            self.assertEqual(
+                client.available_models(),
+                [
+                    "Qwen/Qwen3.5-27B",
+                    "Qwen/Qwen3-Coder-Next",
+                    "MiniMax-M2.1-highspeed",
+                ],
+            )

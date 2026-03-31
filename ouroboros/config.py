@@ -35,6 +35,18 @@ AGENT_SERVER_PORT = 8765
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 DEFAULT_LOCAL_MODEL_PORT = 8766
+_LANE_MODEL_KEYS = {
+    "MAIN": "OUROBOROS_MODEL",
+    "CODE": "OUROBOROS_MODEL_CODE",
+    "LIGHT": "OUROBOROS_MODEL_LIGHT",
+    "FALLBACK": "OUROBOROS_MODEL_FALLBACK",
+}
+_LANE_LOCAL_MODEL_KEYS = {
+    "MAIN": "LOCAL_MODEL_MAIN",
+    "CODE": "LOCAL_MODEL_CODE",
+    "LIGHT": "LOCAL_MODEL_LIGHT",
+    "FALLBACK": "LOCAL_MODEL_FALLBACK",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +128,10 @@ SETTINGS_DEFAULTS = {
     "LOCAL_MODEL_N_GPU_LAYERS": 0,
     "LOCAL_MODEL_CONTEXT_LENGTH": 32768,
     "LOCAL_MODEL_CHAT_FORMAT": "",
+    "LOCAL_MODEL_MAIN": "",
+    "LOCAL_MODEL_CODE": "",
+    "LOCAL_MODEL_LIGHT": "",
+    "LOCAL_MODEL_FALLBACK": "",
     "USE_LOCAL_MAIN": True,
     "USE_LOCAL_CODE": True,
     "USE_LOCAL_LIGHT": True,
@@ -196,9 +212,26 @@ def use_local_for_lane(lane: str, settings: Optional[dict] = None) -> bool:
     lane_key = f"USE_LOCAL_{str(lane or '').upper()}"
     if _truthy(_settings_value(settings, lane_key, False)):
         return True
-    if has_openrouter_config(settings):
+    if has_cloud_provider_config(settings):
         return False
     return has_local_model_config(settings)
+
+
+def get_lane_model(lane: str, settings: Optional[dict] = None, prefer_local: Optional[bool] = None) -> str:
+    """Return the configured model for a lane, using local overrides when requested."""
+    lane_name = str(lane or "").upper().strip()
+    cloud_key = _LANE_MODEL_KEYS.get(lane_name, "OUROBOROS_MODEL")
+    local_key = _LANE_LOCAL_MODEL_KEYS.get(lane_name, "LOCAL_MODEL_MAIN")
+
+    cloud_default = str(SETTINGS_DEFAULTS.get(cloud_key, SETTINGS_DEFAULTS["OUROBOROS_MODEL"]))
+    cloud_model = str(_settings_value(settings, cloud_key, cloud_default) or "").strip() or cloud_default
+    local_model = str(_settings_value(settings, local_key, "") or "").strip()
+
+    if prefer_local is None:
+        prefer_local = use_local_for_lane(lane_name, settings)
+    if prefer_local and local_model:
+        return local_model
+    return cloud_model
 
 
 def resolve_effort(task_type: str) -> str:
@@ -397,6 +430,7 @@ def apply_settings_to_env(settings: dict) -> None:
         "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY",
         "LOCAL_MODEL_PORT", "LOCAL_MODEL_N_GPU_LAYERS", "LOCAL_MODEL_CONTEXT_LENGTH",
         "LOCAL_MODEL_CHAT_FORMAT",
+        "LOCAL_MODEL_MAIN", "LOCAL_MODEL_CODE", "LOCAL_MODEL_LIGHT", "LOCAL_MODEL_FALLBACK",
         "USE_LOCAL_MAIN", "USE_LOCAL_CODE", "USE_LOCAL_LIGHT", "USE_LOCAL_FALLBACK",
         "EXECUTOR_RUNS_SUBDIR", "EXECUTOR_WORKTREES_SUBDIR",
     ]

@@ -49,6 +49,14 @@ export function initSettings({ ws, state }) {
                     <div class="form-field"><label>GGUF Filename (for HF repos)</label><input id="s-local-filename" placeholder="Llama-3.3-70B-Instruct-Q4_K_M.gguf" style="width:400px"></div>
                 </div>
                 <div class="form-row">
+                    <div class="form-field"><label>Local Main Model ID</label><input id="s-local-model-main" placeholder="Qwen/Qwen3.5-27B" style="width:220px"></div>
+                    <div class="form-field"><label>Local Code Model ID</label><input id="s-local-model-code" placeholder="Qwen/Qwen3-Coder-Next" style="width:220px"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field"><label>Local Light Model ID</label><input id="s-local-model-light" placeholder="Qwen/Qwen3.5-27B" style="width:220px"></div>
+                    <div class="form-field"><label>Local Fallback Model ID</label><input id="s-local-model-fallback" placeholder="Qwen/Qwen3.5-27B" style="width:220px"></div>
+                </div>
+                <div class="form-row">
                     <div class="form-field"><label>Port</label><input id="s-local-port" type="number" value="8766" style="width:100px"></div>
                     <div class="form-field"><label>GPU Layers (-1 = all)</label><input id="s-local-gpu-layers" type="number" value="-1" style="width:100px"></div>
                     <div class="form-field"><label>Context Length</label><input id="s-local-ctx" type="number" value="16384" style="width:120px" placeholder="16384"></div>
@@ -66,8 +74,8 @@ export function initSettings({ ws, state }) {
             <div class="form-section">
                 <h3>Models</h3>
                 <div style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary)">
-                    These fields are cloud model IDs. Enable <code>Local</code> to route that lane
-                    through the GGUF server configured above.
+                    These fields are cloud model IDs. If a lane has <code>Local</code> enabled,
+                    Ouroboros will use the matching <code>Local * Model ID</code> above when it is set.
                 </div>
                 <div class="form-row" style="align-items:flex-end">
                     <div class="form-field"><label>Main Model</label><input id="s-model" value="anthropic/claude-opus-4.6" style="width:250px"></div>
@@ -283,6 +291,10 @@ export function initSettings({ ws, state }) {
         if (s.LOCAL_MODEL_BASE_URL) document.getElementById('s-local-base-url').value = s.LOCAL_MODEL_BASE_URL;
         if (s.LOCAL_MODEL_API_KEY) document.getElementById('s-local-api-key').value = s.LOCAL_MODEL_API_KEY;
         if (s.LOCAL_MODEL_FILENAME) document.getElementById('s-local-filename').value = s.LOCAL_MODEL_FILENAME;
+        if (s.LOCAL_MODEL_MAIN) document.getElementById('s-local-model-main').value = s.LOCAL_MODEL_MAIN;
+        if (s.LOCAL_MODEL_CODE) document.getElementById('s-local-model-code').value = s.LOCAL_MODEL_CODE;
+        if (s.LOCAL_MODEL_LIGHT) document.getElementById('s-local-model-light').value = s.LOCAL_MODEL_LIGHT;
+        if (s.LOCAL_MODEL_FALLBACK) document.getElementById('s-local-model-fallback').value = s.LOCAL_MODEL_FALLBACK;
         if (s.LOCAL_MODEL_PORT) document.getElementById('s-local-port').value = s.LOCAL_MODEL_PORT;
         if (s.LOCAL_MODEL_N_GPU_LAYERS != null) document.getElementById('s-local-gpu-layers').value = s.LOCAL_MODEL_N_GPU_LAYERS;
         if (s.LOCAL_MODEL_CONTEXT_LENGTH) document.getElementById('s-local-ctx').value = s.LOCAL_MODEL_CONTEXT_LENGTH;
@@ -420,6 +432,10 @@ export function initSettings({ ws, state }) {
             LOCAL_MODEL_SOURCE: document.getElementById('s-local-source').value,
             LOCAL_MODEL_BASE_URL: document.getElementById('s-local-base-url').value.trim(),
             LOCAL_MODEL_FILENAME: document.getElementById('s-local-filename').value,
+            LOCAL_MODEL_MAIN: document.getElementById('s-local-model-main').value,
+            LOCAL_MODEL_CODE: document.getElementById('s-local-model-code').value,
+            LOCAL_MODEL_LIGHT: document.getElementById('s-local-model-light').value,
+            LOCAL_MODEL_FALLBACK: document.getElementById('s-local-model-fallback').value,
             LOCAL_MODEL_PORT: parseInt(document.getElementById('s-local-port').value) || 8766,
             LOCAL_MODEL_N_GPU_LAYERS: parseInt(document.getElementById('s-local-gpu-layers').value),
             LOCAL_MODEL_CONTEXT_LENGTH: parseInt(document.getElementById('s-local-ctx').value) || 16384,

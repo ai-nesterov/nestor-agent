@@ -16,6 +16,7 @@ import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ouroboros.config import (
+    get_lane_model,
     get_cloud_provider,
     has_local_model_config,
     has_minimax_config,
@@ -235,11 +236,15 @@ class LLMClient:
         base_url: Optional[str] = None,
         provider: Optional[str] = None,
     ):
-        self._api_key_override = api_key
-        self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url_override = base_url
-        self._base_url = resolve_openrouter_base_url(base_url)
         self._provider_override: Optional[str] = str(provider).strip().lower() if provider else None
+        initial_provider = self._provider_override or get_cloud_provider()
+        self._api_key_override = api_key
+        if api_key is not None:
+            self._api_key = api_key
+        else:
+            self._api_key = os.environ.get("MINIMAX_API_KEY", "") if initial_provider == "minimax" else os.environ.get("OPENROUTER_API_KEY", "")
+        self._base_url_override = base_url
+        self._base_url = resolve_minimax_base_url(base_url) if initial_provider == "minimax" else resolve_openrouter_base_url(base_url)
         self._client = None
         self._client_api_key: Optional[str] = None
         self._client_base_url: Optional[str] = None
@@ -404,9 +409,10 @@ class LLMClient:
 
         if use_local or should_fallback_to_local:
             if should_fallback_to_local:
+                missing_key = "MINIMAX_API_KEY" if provider == "minimax" else "OPENROUTER_API_KEY"
                 log.info(
-                    "OPENROUTER_API_KEY is not set; routing chat() call to local backend "
-                    "for model '%s'",
+                    "%s is not set; routing chat() call to local backend for model '%s'",
+                    missing_key,
                     model,
                 )
             return self._chat_local(
@@ -783,9 +789,10 @@ class LLMClient:
             return requested_model
 
         preferred = [
-            str(os.environ.get("OUROBOROS_MODEL", "")).strip(),
-            str(os.environ.get("OUROBOROS_MODEL_LIGHT", "")).strip(),
-            str(os.environ.get("OUROBOROS_MODEL_CODE", "")).strip(),
+            get_lane_model("MAIN", prefer_local=True),
+            get_lane_model("LIGHT", prefer_local=True),
+            get_lane_model("CODE", prefer_local=True),
+            get_lane_model("FALLBACK", prefer_local=True),
             "Qwen/Qwen3.5-27B",
         ]
         for candidate in preferred:
@@ -1144,16 +1151,19 @@ class LLMClient:
 
     def default_model(self) -> str:
         """Return the single default model from env. LLM switches via tool if needed."""
-        return os.environ.get("OUROBOROS_MODEL", "anthropic/claude-opus-4.6")
+        return get_lane_model("MAIN")
 
     def available_models(self) -> List[str]:
         """Return list of available models from env (for switch_model tool schema)."""
-        main = os.environ.get("OUROBOROS_MODEL", "anthropic/claude-opus-4.6")
-        code = os.environ.get("OUROBOROS_MODEL_CODE", "")
-        light = os.environ.get("OUROBOROS_MODEL_LIGHT", "")
+        main = get_lane_model("MAIN")
+        code = get_lane_model("CODE")
+        light = get_lane_model("LIGHT")
+        fallback = get_lane_model("FALLBACK")
         models = [main]
         if code and code != main:
             models.append(code)
         if light and light != main and light != code:
             models.append(light)
+        if fallback and fallback not in models:
+            models.append(fallback)
         return models
