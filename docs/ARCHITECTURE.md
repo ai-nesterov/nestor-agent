@@ -43,6 +43,7 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
       ├── memory.py            ← Scratchpad, identity, chat history
       ├── context.py           ← LLM context builder (public API for consciousness)
       ├── context_compaction.py ← Context trimming and summarization helpers
+      ├── outcome.py           ← Canonical execution facts and outcome schema
       ├── local_model.py       ← Local LLM lifecycle (llama-cpp-python)
       ├── local_model_api.py   ← Local model HTTP endpoints
       ├── local_model_autostart.py ← Local model startup helper
@@ -152,6 +153,41 @@ launcher.py main()
 Shown when `settings.json` has no configured LLM backend.
 Fields: OpenRouter API Key (optional), local model preset (optional), Total Budget ($), Main Model.
 On save: writes `settings.json`, closes wizard, proceeds to main app.
+
+---
+
+## Execution Outcome Contract
+
+Task completion is modeled in two layers:
+
+1. `execution_facts`
+   - Runtime-collected facts about what actually happened in the loop.
+   - Examples: tool call counts, write operations, `schedule_task` usage, `repo_commit`,
+     provider-blocked flags, final text presence.
+   - These facts are produced by runtime code, not inferred from narrative text.
+
+2. `execution_outcome`
+   - Canonical classification attached to the task result.
+   - Enum values:
+     - `executed_work`
+     - `scheduled_followup`
+     - `committed`
+     - `verified_no_change_needed`
+     - `needs_owner_input`
+     - `blocked_external`
+     - `report_only`
+     - `failed`
+   - Additional fields:
+     - `outcome_reason`
+     - `outcome_source` (`rule`, `model`, `fallback_supervisor`)
+     - `productive` (`true/false`)
+
+Rules for the architecture:
+- Runtime facts are the primary source of truth.
+- Deterministic classification handles obvious cases first.
+- Model-based adjudication is allowed only for ambiguous cases.
+- Supervisor prefers canonical `execution_outcome` from `task_results`.
+- Supervisor-level heuristics remain only as a backward-compatible fallback during migration.
 
 ### Core file sync (`_sync_core_files`)
 
