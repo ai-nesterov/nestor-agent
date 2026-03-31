@@ -290,7 +290,9 @@ class BackgroundConsciousness:
                         "category": "consciousness",
                     })
 
+                reasoning = strip_reasoning_artifacts(msg.get("reasoning") or "")
                 content = strip_reasoning_artifacts(msg.get("content") or "")
+                display_text = reasoning or content
                 tool_calls = msg.get("tool_calls") or []
                 self._emit_live_log(
                     "llm_round_finished",
@@ -305,17 +307,17 @@ class BackgroundConsciousness:
                     cost_usd=cost,
                     response_kind="tool_calls" if tool_calls else "message",
                     tool_call_count=len(tool_calls),
-                    has_text=bool(content.strip()),
+                    has_text=bool(display_text.strip()),
                 )
 
-                self._emit_progress(content)
+                self._emit_progress(display_text)
 
                 if self._paused:
                     break
 
                 # If we have content but no tool calls, we're done
-                if content and not tool_calls:
-                    final_content = content
+                if display_text and not tool_calls:
+                    final_content = display_text
                     break
 
                 # If we have tool calls, execute them and continue loop

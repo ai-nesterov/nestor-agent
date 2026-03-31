@@ -74,13 +74,16 @@ def _get_quota_adjusted_effort(
 
 def _handle_text_response(
     content: Optional[str],
+    reasoning: Optional[str],
     llm_trace: Dict[str, Any],
     accumulated_usage: Dict[str, Any],
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """Handle LLM response without tool calls (final response)."""
     cleaned = strip_reasoning_artifacts(content or "")
-    if cleaned:
-        llm_trace["reasoning_notes"].append(cleaned)
+    reasoning_text = strip_reasoning_artifacts(reasoning or "")
+    note = reasoning_text or cleaned
+    if note:
+        llm_trace["reasoning_notes"].append(note)
     return cleaned, accumulated_usage, llm_trace
 
 
@@ -452,14 +455,16 @@ def run_llm_loop(
 
             tool_calls = msg.get("tool_calls") or []
             content = msg.get("content")
+            reasoning = msg.get("reasoning")
             if not tool_calls:
-                return _handle_text_response(content, llm_trace, accumulated_usage)
+                return _handle_text_response(content, reasoning, llm_trace, accumulated_usage)
 
             messages.append({"role": "assistant", "content": content or "", "tool_calls": tool_calls})
 
-            if content and content.strip():
-                emit_progress(content.strip())
-                llm_trace["reasoning_notes"].append(content.strip())
+            progress_note = strip_reasoning_artifacts(reasoning or "") or strip_reasoning_artifacts(content or "")
+            if progress_note:
+                emit_progress(progress_note)
+                llm_trace["reasoning_notes"].append(progress_note)
 
             error_count = handle_tool_calls(
                 tool_calls, tools, drive_logs, task_id, stateful_executor,

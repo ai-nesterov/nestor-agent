@@ -123,6 +123,35 @@ class TestEmitProgress(unittest.TestCase):
         content = events_path.read_text(encoding="utf-8")
         self.assertIn("consciousness_quota_deferred", content)
 
+    def test_think_emits_reasoning_to_progress_and_preview(self):
+        bc, eq, drive_root = self._make_consciousness()
+        bc._max_bg_rounds = 1
+        bc._build_context = MagicMock(return_value="ctx")
+        bc._tool_schemas = MagicMock(return_value=[])
+        bc._llm.chat = MagicMock(return_value=(
+            {"content": "visible answer", "reasoning": "private thought", "tool_calls": []},
+            {"provider": "minimax", "cost": 0.0},
+        ))
+        bc._llm.cloud_provider = MagicMock(return_value="minimax")
+
+        with patch("ouroboros.consciousness.use_local_for_lane", return_value=False), \
+             patch("ouroboros.consciousness.get_provider_quota_status", return_value={
+                 "hard_blocked": False,
+                 "soft_limited": False,
+                 "reason": "",
+             }):
+            bc._think()
+
+        queued = []
+        while not eq.empty():
+            queued.append(eq.get_nowait())
+        progress = next(evt for evt in queued if evt.get("type") == "send_message")
+        self.assertEqual(progress["text"], "💬 private thought")
+
+        events_path = drive_root / "logs" / "events.jsonl"
+        content = events_path.read_text(encoding="utf-8")
+        self.assertIn('"thought_preview": "private thought"', content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -199,15 +199,16 @@ def test_handle_schedule_task_allows_requested_status_seed(tmp_path):
     assert pending[0]["id"] == "seed001"
 
 
-def test_handle_text_response_strips_think_blocks_before_recording_reasoning_note():
+def test_handle_text_response_prefers_reasoning_note_and_keeps_clean_content():
     from ouroboros.loop import _handle_text_response
 
     content = "<think>private chain</think>\n" + ("A" * 500)
+    reasoning = "visible thought"
     llm_trace = {"reasoning_notes": [], "tool_calls": []}
-    final_text, _, updated = _handle_text_response(content, llm_trace, {})
+    final_text, _, updated = _handle_text_response(content, reasoning, llm_trace, {})
 
     assert final_text == "A" * 500
-    assert updated["reasoning_notes"] == ["A" * 500]
+    assert updated["reasoning_notes"] == ["visible thought"]
 
 
 def test_handle_log_event_persists_status_transition(tmp_path):
