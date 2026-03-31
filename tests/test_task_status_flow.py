@@ -206,10 +206,11 @@ def test_handle_text_response_prefers_reasoning_note_and_keeps_clean_content():
     content = "<think>private chain</think>\n" + ("A" * 500)
     reasoning = "visible thought"
     llm_trace = {"reasoning_notes": [], "tool_calls": []}
-    final_text, _, updated = _handle_text_response(content, reasoning, llm_trace, {})
+    final_text, _, updated, outcome = _handle_text_response(content, reasoning, llm_trace, {})
 
     assert final_text == "A" * 500
     assert updated["reasoning_notes"] == ["visible thought"]
+    assert outcome["outcome_class"] == "report_only"
 
 
 def test_handle_log_event_persists_status_transition(tmp_path):
