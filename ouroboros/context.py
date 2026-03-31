@@ -271,7 +271,7 @@ def build_recent_sections(memory: Memory, env: Any, task_id: str = "") -> List[s
     """Build recent dialogue and process-memory sections."""
     sections = []
 
-    chat_summary = memory.summarize_chat(memory.read_jsonl_tail("chat.jsonl", 1000))
+    chat_summary = memory.summarize_chat(memory.read_jsonl_tail("chat.jsonl", 200))
     if chat_summary:
         sections.append("## Recent chat\n\n" + chat_summary)
 
@@ -739,10 +739,6 @@ def build_llm_messages(
         fallback="You are Ouroboros. Your base prompt could not be loaded."
     )
     bible_md = safe_read(env.repo_path("BIBLE.md"))
-    arch_md = safe_read(env.repo_path("docs/ARCHITECTURE.md"))
-    dev_guide_md = safe_read(env.repo_path("docs/DEVELOPMENT.md"))
-    readme_md = safe_read(env.repo_path("README.md"))
-    checklists_md = safe_read(env.repo_path("docs/CHECKLISTS.md"))
     state_json = safe_read(env.drive_path("state/state.json"), fallback="{}")
 
     memory.ensure_files()
@@ -751,14 +747,6 @@ def build_llm_messages(
         base_prompt + "\n\n"
         + "## BIBLE.md\n\n" + bible_md
     )
-    if arch_md.strip():
-        static_text += "\n\n## ARCHITECTURE.md\n\n" + arch_md
-    if dev_guide_md.strip():
-        static_text += "\n\n## DEVELOPMENT.md\n\n" + dev_guide_md
-    if readme_md.strip():
-        static_text += "\n\n## README.md\n\n" + readme_md
-    if checklists_md.strip():
-        static_text += "\n\n## CHECKLISTS.md\n\n" + checklists_md
 
     semi_stable_parts = []
     semi_stable_parts.extend(build_memory_sections(memory))

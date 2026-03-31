@@ -43,16 +43,18 @@ def _build_system_text(task_overrides=None):
     return " ".join(block.get("text", "") for block in content if isinstance(block, dict))
 
 
-def test_direct_chat_includes_development_readme_and_checklists():
+def test_direct_chat_keeps_core_docs_only():
     text = _build_system_text({"_is_direct_chat": True})
-    assert "DEVELOPMENT.md" in text
-    assert "README.md" in text
-    assert "CHECKLISTS.md" in text
+    assert "BIBLE.md" in text
+    assert "DEVELOPMENT.md" not in text
+    assert "README.md" not in text
+    assert "CHECKLISTS.md" not in text
 
 
-def test_regular_and_evolution_tasks_include_all_docs():
-    assert "DEVELOPMENT.md" in _build_system_text({"type": "task"})
-    assert "DEVELOPMENT.md" in _build_system_text({"type": "evolution"})
+def test_regular_and_evolution_tasks_keep_core_docs_only():
+    assert "DEVELOPMENT.md" not in _build_system_text({"type": "task"})
+    assert "DEVELOPMENT.md" not in _build_system_text({"type": "evolution"})
+    assert "BIBLE.md" in _build_system_text({"type": "task"})
 
 
 def test_version_regexes_match_runtime_formats():

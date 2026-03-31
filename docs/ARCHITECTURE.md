@@ -414,7 +414,7 @@ Each iteration (0.5s sleep):
 - All tools have hard timeout (default 360s, per-tool overrides for browser/search/vision)
 - Multi-layer safety: hardcoded sandbox (registry.py) → deterministic whitelist → LLM safety supervisor
 - Tool results use explicit per-tool caps with visible truncation markers (`repo_read`/`data_read`/`knowledge_read`/`run_shell`: 80k, default: 15k chars). Cognitive reads (`memory/*`, prompts, BIBLE/docs, commit/review outputs) are exempt from silent clipping.
-- Context compaction kicks in after round 8 (summarizes old tool results)
+- Context compaction now starts earlier on longer tasks: after round 4 when message volume is already growing, and more aggressively after round 8 (summarizes old tool results while keeping a shorter recent tail intact)
 
 ### Git tools (tools/git.py + tools/review.py + supervisor/git_ops.py)
 
@@ -528,7 +528,7 @@ the constitutional guard is that the file itself must remain non-deletable.
 
 - As of v3.16.0, the Memory Registry digest (from `memory/registry.md`) is injected into every LLM context to enable source-of-truth awareness.
 - As of v3.20.0, `patterns.md` (Pattern Register) is injected into semi-stable context, and execution reflections from `task_reflections.jsonl` are injected into dynamic context.
-- As of v3.22.0, all docs are always in static context: BIBLE.md (180k), ARCHITECTURE.md (60k), DEVELOPMENT.md (30k), README.md (10k), CHECKLISTS.md (5k).
+- Static context keeps the core prompt plus BIBLE.md. Larger project docs such as ARCHITECTURE.md, DEVELOPMENT.md, README.md, and CHECKLISTS.md are no longer always injected into every round and should be read on demand when the task needs them.
 - `Health Invariants` are placed at the start of the dynamic context block, before drive state/runtime/recent sections, so warnings influence planning before the model reads the noisier tail sections.
 - `build_recent_sections()` keeps recent dialogue broad, but task-scopes recent progress/tools/events when `task_id` is available.
 - `build_health_invariants()` is split into focused helpers and now also surfaces recent provider/routing errors plus local context overflows.

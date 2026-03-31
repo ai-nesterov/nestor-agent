@@ -42,7 +42,6 @@ def test_prepare_messages_for_local_context_preserves_core_and_compacts_non_core
     system_blocks = compacted[0]["content"]
 
     assert "## BIBLE.md" in system_blocks[0]["text"]
-    assert "ARCHITECTURE.md" in system_blocks[0]["text"]
     assert "[Compacted for local-model context" in system_blocks[0]["text"]
     assert "## Scratchpad" in system_blocks[1]["text"]
     assert "## Identity" in system_blocks[1]["text"]

@@ -429,11 +429,11 @@ def run_llm_loop(
             if pending_compaction is not None:
                 messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=pending_compaction)
                 tools._ctx._pending_compaction = None
-            elif round_idx > 12:
-                messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=50)
-            elif round_idx > 6:
-                if len(messages) > 80:
-                    messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=50)
+            elif round_idx > 8:
+                messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=10)
+            elif round_idx > 4:
+                if len(messages) > 40:
+                    messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=12)
             if tools._ctx.messages is not messages:
                 tools._ctx.messages = messages
             if _compaction_usage:

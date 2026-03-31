@@ -343,7 +343,7 @@ class Memory:
         if not entries:
             return ""
         lines = []
-        for e in entries[-1000:]:
+        for e in entries[-200:]:
             dir_raw = str(e.get("direction", "")).lower()
             ts_full = e.get("ts", "")
             ts_hhmm = ts_full[11:16] if len(ts_full) >= 16 else ""
