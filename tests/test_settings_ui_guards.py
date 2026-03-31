@@ -17,6 +17,7 @@ class TestSettingsUiGuards(unittest.TestCase):
     def test_save_does_not_overwrite_masked_secrets(self):
         source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")
         self.assertIn("if (orKey && !orKey.includes('...')) body.OPENROUTER_API_KEY = orKey;", source)
+        self.assertIn("if (minimaxKey && !minimaxKey.includes('...')) body.MINIMAX_API_KEY = minimaxKey;", source)
         self.assertIn("if (oaiKey && !oaiKey.includes('...')) body.OPENAI_API_KEY = oaiKey;", source)
         self.assertIn("if (antKey && !antKey.includes('...')) body.ANTHROPIC_API_KEY = antKey;", source)
         self.assertIn("if (ghToken && !ghToken.includes('...')) body.GITHUB_TOKEN = ghToken;", source)
@@ -34,3 +35,15 @@ class TestSettingsUiGuards(unittest.TestCase):
     def test_save_reloads_settings_after_success(self):
         source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")
         self.assertIn("await loadSettings();", source)
+
+    def test_settings_ui_has_provider_controls(self):
+        source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")
+        self.assertIn("Primary Cloud Provider", source)
+        self.assertIn("MiniMax API Key", source)
+        self.assertIn("MINIMAX_REQUESTS_5H_LIMIT", source)
+
+    def test_wizard_mentions_minimax(self):
+        source = (REPO / "launcher.py").read_text(encoding="utf-8")
+        self.assertIn("MiniMax API Key", source)
+        self.assertIn("LLM_PROVIDER", source)
+        self.assertIn("OpenRouter, MiniMax or local model", source)

@@ -20,6 +20,9 @@ export function initCosts({ ws, state }) {
                 <div class="stat-card"><div class="stat-label">Codex Daily</div><div class="stat-value" id="executor-codex-daily">0 / 0</div></div>
                 <div class="stat-card"><div class="stat-label">Claude Daily</div><div class="stat-value" id="executor-claude-daily">0 / 0</div></div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px">
+                <div class="stat-card"><div class="stat-label">MiniMax 5h Window</div><div class="stat-value" id="minimax-5h-window">0 / 0</div></div>
+            </div>
             <div style="margin-bottom:24px">
                 <h3 style="font-size:14px;color:var(--text-secondary);margin:0 0 8px">External Worker Limits</h3>
                 <table class="cost-table" id="executor-limits-table">
@@ -123,6 +126,11 @@ export function initCosts({ ws, state }) {
             document.getElementById('cost-calls').textContent = d.total_calls || 0;
             const models = Object.entries(d.by_model || {});
             document.getElementById('cost-top-model').textContent = models.length > 0 ? models[0][0] : '-';
+            const minimaxLimit = d.minimax_requests_5h_limit || 0;
+            const minimaxUsed = d.minimax_requests_5h_used || 0;
+            const minimaxRemaining = d.minimax_requests_5h_remaining;
+            document.getElementById('minimax-5h-window').textContent =
+                minimaxLimit > 0 ? `${minimaxUsed} / ${minimaxLimit} (${minimaxRemaining} left)` : `${minimaxUsed} / unknown`;
             renderBreakdownTable('cost-by-model', d.by_model || {}, d.total_cost);
             renderBreakdownTable('cost-by-key', d.by_api_key || {}, d.total_cost);
             renderBreakdownTable('cost-by-model-cat', d.by_model_category || {}, d.total_cost);

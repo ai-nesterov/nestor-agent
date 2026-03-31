@@ -9,9 +9,29 @@ export function initSettings({ ws, state }) {
         </div>
         <div class="settings-scroll">
             <div class="form-section">
-                <h3>API Keys</h3>
+                <h3>Cloud Provider</h3>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Primary Cloud Provider</label>
+                        <select id="s-llm-provider" style="width:220px">
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="minimax">MiniMax</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="form-row"><div class="form-field"><label>OpenRouter API Key</label><input id="s-openrouter" type="password" placeholder="sk-or-..."></div></div>
                 <div class="form-row"><div class="form-field"><label>OpenRouter Base URL</label><input id="s-openrouter-base-url" placeholder="https://openrouter.ai/api/v1"></div></div>
+                <div class="form-row"><div class="form-field"><label>MiniMax API Key</label><input id="s-minimax" type="password" placeholder="minimax-..."></div></div>
+                <div class="form-row"><div class="form-field"><label>MiniMax Base URL</label><input id="s-minimax-base-url" placeholder="https://api.minimax.io/v1"></div></div>
+                <div class="form-row">
+                    <div class="form-field"><label>MiniMax Plan Type</label><input id="s-minimax-plan-type" value="token_plan" style="width:180px"></div>
+                    <div class="form-field"><label>MiniMax Plan Tier</label><input id="s-minimax-plan-tier" placeholder="starter / custom" style="width:180px"></div>
+                    <div class="form-field"><label>MiniMax 5h Request Limit</label><input id="s-minimax-5h-limit" type="number" value="0" style="width:140px"></div>
+                </div>
+            </div>
+            <div class="divider"></div>
+            <div class="form-section">
+                <h3>API Keys</h3>
                 <div class="form-row"><div class="form-field"><label>OpenAI API Key (optional)</label><input id="s-openai" type="password"></div></div>
                 <div class="form-row"><div class="form-field"><label>Anthropic API Key (optional)</label><input id="s-anthropic" type="password"></div></div>
             </div>
@@ -207,7 +227,7 @@ export function initSettings({ ws, state }) {
     `;
     document.getElementById('content').appendChild(page);
 
-    const secretInputIds = ['s-openrouter', 's-openai', 's-anthropic', 's-gh-token', 's-local-api-key', 's-tg-secret'];
+    const secretInputIds = ['s-openrouter', 's-minimax', 's-openai', 's-anthropic', 's-gh-token', 's-local-api-key', 's-tg-secret'];
     secretInputIds.forEach((id) => {
         const input = document.getElementById(id);
         input.addEventListener('focus', () => {
@@ -216,8 +236,14 @@ export function initSettings({ ws, state }) {
     });
 
     function applySettings(s) {
+        document.getElementById('s-llm-provider').value = s.LLM_PROVIDER || 'openrouter';
         if (s.OPENROUTER_API_KEY) document.getElementById('s-openrouter').value = s.OPENROUTER_API_KEY;
         document.getElementById('s-openrouter-base-url').value = s.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+        if (s.MINIMAX_API_KEY) document.getElementById('s-minimax').value = s.MINIMAX_API_KEY;
+        document.getElementById('s-minimax-base-url').value = s.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
+        document.getElementById('s-minimax-plan-type').value = s.MINIMAX_PLAN_TYPE || 'token_plan';
+        document.getElementById('s-minimax-plan-tier').value = s.MINIMAX_PLAN_TIER || '';
+        if (s.MINIMAX_REQUESTS_5H_LIMIT != null) document.getElementById('s-minimax-5h-limit').value = s.MINIMAX_REQUESTS_5H_LIMIT;
         if (s.OPENAI_API_KEY) document.getElementById('s-openai').value = s.OPENAI_API_KEY;
         if (s.ANTHROPIC_API_KEY) document.getElementById('s-anthropic').value = s.ANTHROPIC_API_KEY;
         if (s.OUROBOROS_MODEL) document.getElementById('s-model').value = s.OUROBOROS_MODEL;
@@ -355,7 +381,12 @@ export function initSettings({ ws, state }) {
 
     document.getElementById('btn-save-settings').addEventListener('click', async () => {
         const body = {
+            LLM_PROVIDER: document.getElementById('s-llm-provider').value || 'openrouter',
             OPENROUTER_BASE_URL: document.getElementById('s-openrouter-base-url').value.trim(),
+            MINIMAX_BASE_URL: document.getElementById('s-minimax-base-url').value.trim(),
+            MINIMAX_PLAN_TYPE: document.getElementById('s-minimax-plan-type').value.trim() || 'token_plan',
+            MINIMAX_PLAN_TIER: document.getElementById('s-minimax-plan-tier').value.trim(),
+            MINIMAX_REQUESTS_5H_LIMIT: parseInt(document.getElementById('s-minimax-5h-limit').value) || 0,
             OUROBOROS_MODEL: document.getElementById('s-model').value,
             OUROBOROS_MODEL_CODE: document.getElementById('s-model-code').value,
             OUROBOROS_MODEL_LIGHT: document.getElementById('s-model-light').value,
@@ -400,6 +431,8 @@ export function initSettings({ ws, state }) {
         };
         const orKey = document.getElementById('s-openrouter').value;
         if (orKey && !orKey.includes('...')) body.OPENROUTER_API_KEY = orKey;
+        const minimaxKey = document.getElementById('s-minimax').value;
+        if (minimaxKey && !minimaxKey.includes('...')) body.MINIMAX_API_KEY = minimaxKey;
         const oaiKey = document.getElementById('s-openai').value;
         if (oaiKey && !oaiKey.includes('...')) body.OPENAI_API_KEY = oaiKey;
         const antKey = document.getElementById('s-anthropic').value;

@@ -721,13 +721,25 @@ a { color:#e85d6f; }
   <h2>Ouroboros</h2>
   <p class="sub">Configure your LLM provider. Everything can be changed later in Settings.</p>
 
-  <h3>Cloud LLM (OpenRouter)</h3>
-  <label>OpenRouter API Key <span class="opt">— required for cloud models</span></label>
+  <h3>Cloud LLM</h3>
+  <label>Primary Cloud Provider</label>
+  <select id="cloud-provider">
+    <option value="openrouter">OpenRouter</option>
+    <option value="minimax">MiniMax</option>
+  </select>
+  <label>OpenRouter API Key <span class="opt">— optional</span></label>
   <input id="api-key" type="password" placeholder="sk-or-v1-..." autofocus>
   <p class="hint">Get one at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></p>
+  <label>MiniMax API Key <span class="opt">— optional</span></label>
+  <input id="minimax-key" type="password" placeholder="minimax-...">
+  <p class="hint">Use the Token Plan or pay-as-you-go key from MiniMax Open Platform.</p>
   <div class="row">
     <div class="field"><label>Main Model</label><input id="model" value="anthropic/claude-opus-4.6"></div>
     <div class="field"><label>Budget ($)</label><input id="budget" type="number" value="10" min="1" step="1" style="width:100px"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>MiniMax 5h Request Limit</label><input id="minimax-5h-limit" type="number" value="0" min="0" step="1"></div>
+    <div class="field"><label>MiniMax Plan Type</label><input id="minimax-plan-type" value="token_plan"></div>
   </div>
 
   <label>OpenAI API Key <span class="opt">— for web search</span></label>
@@ -762,15 +774,17 @@ const PRESETS = {
     'qwen3-32b':  { source: 'Qwen/Qwen3-32B-GGUF', filename: 'Qwen3-32B-Q4_K_M.gguf', ctx: 32768 },
 };
 const keyInput = document.getElementById('api-key');
+const minimaxKeyInput = document.getElementById('minimax-key');
 const preset = document.getElementById('local-preset');
 const btn = document.getElementById('save-btn');
 
 function validate() {
-    const hasKey = keyInput.value.trim().length >= 10;
+    const hasKey = keyInput.value.trim().length >= 10 || minimaxKeyInput.value.trim().length >= 10;
     const hasLocal = preset.value !== '';
     btn.disabled = !(hasKey || hasLocal);
 }
 keyInput.addEventListener('input', validate);
+minimaxKeyInput.addEventListener('input', validate);
 preset.addEventListener('change', () => {
     document.getElementById('custom-fields').style.display = preset.value === 'custom' ? '' : 'none';
     validate();
@@ -781,9 +795,14 @@ btn.addEventListener('click', async () => {
     const data = {
         TOTAL_BUDGET: parseFloat(document.getElementById('budget').value) || 10,
         OUROBOROS_MODEL: document.getElementById('model').value.trim() || 'anthropic/claude-opus-4.6',
+        LLM_PROVIDER: document.getElementById('cloud-provider').value || 'openrouter',
+        MINIMAX_PLAN_TYPE: document.getElementById('minimax-plan-type').value.trim() || 'token_plan',
+        MINIMAX_REQUESTS_5H_LIMIT: parseInt(document.getElementById('minimax-5h-limit').value) || 0,
     };
     const orKey = keyInput.value.trim();
     if (orKey.length >= 10) data.OPENROUTER_API_KEY = orKey;
+    const minimaxKey = minimaxKeyInput.value.trim();
+    if (minimaxKey.length >= 10) data.MINIMAX_API_KEY = minimaxKey;
     const oaiKey = document.getElementById('openai-key').value.trim();
     if (oaiKey.length >= 10) data.OPENAI_API_KEY = oaiKey;
     const localApiKey = document.getElementById('local-api-key').value.trim();
@@ -795,17 +814,17 @@ btn.addEventListener('click', async () => {
         data.LOCAL_MODEL_FILENAME = PRESETS[p].filename;
         data.LOCAL_MODEL_CONTEXT_LENGTH = PRESETS[p].ctx;
         data.LOCAL_MODEL_N_GPU_LAYERS = defaultGpuLayers;
-        data.USE_LOCAL_MAIN = !orKey;
-        data.USE_LOCAL_LIGHT = !orKey;
-        data.USE_LOCAL_CODE = !orKey;
+        data.USE_LOCAL_MAIN = !orKey && !minimaxKey;
+        data.USE_LOCAL_LIGHT = !orKey && !minimaxKey;
+        data.USE_LOCAL_CODE = !orKey && !minimaxKey;
         data.USE_LOCAL_FALLBACK = true;
     } else if (p === 'custom') {
         data.LOCAL_MODEL_SOURCE = document.getElementById('local-source').value.trim();
         data.LOCAL_MODEL_FILENAME = document.getElementById('local-filename').value.trim();
         data.LOCAL_MODEL_N_GPU_LAYERS = defaultGpuLayers;
-        data.USE_LOCAL_MAIN = !orKey;
-        data.USE_LOCAL_LIGHT = !orKey;
-        data.USE_LOCAL_CODE = !orKey;
+        data.USE_LOCAL_MAIN = !orKey && !minimaxKey;
+        data.USE_LOCAL_LIGHT = !orKey && !minimaxKey;
+        data.USE_LOCAL_CODE = !orKey && !minimaxKey;
         data.USE_LOCAL_FALLBACK = true;
     }
     const result = await window.pywebview.api.save_wizard(data);
@@ -831,10 +850,11 @@ def _run_first_run_wizard() -> bool:
 
     class WizardApi:
         def save_wizard(self, data: dict) -> str:
-            key = str(data.get("OPENROUTER_API_KEY", "")).strip()
+            openrouter_key = str(data.get("OPENROUTER_API_KEY", "")).strip()
+            minimax_key = str(data.get("MINIMAX_API_KEY", "")).strip()
             has_local = has_local_model_config(data)
-            if len(key) < 10 and not has_local:
-                return "Configure at least one LLM provider: OpenRouter or local model."
+            if len(openrouter_key) < 10 and len(minimax_key) < 10 and not has_local:
+                return "Configure at least one LLM provider: OpenRouter, MiniMax or local model."
             settings.update(data)
             try:
                 _save_settings(settings)

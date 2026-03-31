@@ -587,6 +587,9 @@ async def api_state(request: Request) -> JSONResponse:
             "bg_consciousness_enabled": bool(st.get("bg_consciousness_enabled")),
             "evolution_cycle": int(st.get("evolution_cycle") or 0),
             "spent_calls": int(st.get("spent_calls") or 0),
+            "minimax_requests_5h_used": int(st.get("minimax_requests_5h_used") or 0),
+            "minimax_requests_5h_limit": int(st.get("minimax_requests_5h_limit") or 0),
+            "minimax_requests_5h_remaining": st.get("minimax_requests_5h_remaining"),
             "supervisor_ready": _supervisor_ready.is_set(),
             "supervisor_error": _supervisor_error,
         })
@@ -754,7 +757,7 @@ async def api_executor_status(request: Request) -> JSONResponse:
 async def api_settings_get(request: Request) -> JSONResponse:
     settings = load_settings()
     safe = {k: v for k, v in settings.items()}
-    for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "LOCAL_MODEL_API_KEY"):
+    for key in ("OPENROUTER_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "LOCAL_MODEL_API_KEY"):
         if safe.get(key):
             safe[key] = safe[key][:8] + "..." if len(safe[key]) > 8 else "***"
     return JSONResponse(safe)
@@ -958,6 +961,7 @@ async def api_cost_breakdown(request: Request) -> JSONResponse:
     def _sorted(d):
         return dict(sorted(d.items(), key=lambda x: x[1]["cost"], reverse=True))
 
+    state = load_state()
     return JSONResponse({
         "total_cost": round(total_cost, 4),
         "total_calls": total_calls,
@@ -965,6 +969,9 @@ async def api_cost_breakdown(request: Request) -> JSONResponse:
         "by_api_key": _sorted(by_api_key),
         "by_model_category": _sorted(by_model_category),
         "by_task_category": _sorted(by_task_category),
+        "minimax_requests_5h_used": int(state.get("minimax_requests_5h_used") or 0),
+        "minimax_requests_5h_limit": int(state.get("minimax_requests_5h_limit") or 0),
+        "minimax_requests_5h_remaining": state.get("minimax_requests_5h_remaining"),
     })
 
 
