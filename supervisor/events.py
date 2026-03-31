@@ -416,6 +416,8 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "outcome_reason": blocked_reason,
                 "outcome_source": outcome_source,
             },
+            final_text=str((result_payload or {}).get("result") or ""),
+            execution_facts=(result_payload or {}).get("execution_facts") or {},
         )
         outcome = str(policy_adjusted.get("outcome_class") or outcome)
         blocked_reason = str(policy_adjusted.get("outcome_reason") or blocked_reason)
@@ -488,6 +490,8 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "outcome_reason": blocked_reason,
                 "outcome_source": outcome_source,
             },
+            final_text=str((result_payload or {}).get("result") or ""),
+            execution_facts=(result_payload or {}).get("execution_facts") or {},
         )
         outcome = str(policy_adjusted.get("outcome_class") or outcome)
         blocked_reason = str(policy_adjusted.get("outcome_reason") or blocked_reason)

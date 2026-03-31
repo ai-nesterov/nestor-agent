@@ -125,6 +125,8 @@ def _finalize_loop_return(
     outcome = apply_task_type_outcome_policy(
         task_type=str(llm_trace.get("task_type") or ""),
         execution_outcome=outcome,
+        final_text=text,
+        execution_facts=facts,
     )
     return text, accumulated_usage, llm_trace, outcome
 

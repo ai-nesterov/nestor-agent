@@ -49,11 +49,16 @@ _OWNER_INPUT_PATTERNS = (
     "what would you like me to do",
     "what should i work on",
     "what's the goal",
+    "what goal should i",
     "want me to proceed",
     "which goal should i work on",
+    "which option should i",
+    "what do you want me to",
     "что выбираешь",
+    "что скажешь",
     "что бы ты хотел",
     "хочешь, чтобы я",
+    "какая цель",
     "какую цель",
 )
 _BLOCKED_PATTERNS = (
@@ -116,6 +121,13 @@ def build_execution_outcome(
     }
 
 
+def _requests_owner_direction(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+    return any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS)
+
+
 def classify_outcome_from_facts(
     *,
     task_type: str,
@@ -139,7 +151,7 @@ def classify_outcome_from_facts(
             reason="provider_or_quota_block_message",
         )
 
-    if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS) or int(facts.get("owner_message_requests") or 0) > 0:
+    if _requests_owner_direction(text) or int(facts.get("owner_message_requests") or 0) > 0:
         return build_execution_outcome(
             OUTCOME_NEEDS_OWNER_INPUT,
             reason="agent_requested_owner_direction",
@@ -267,17 +279,36 @@ def apply_task_type_outcome_policy(
     *,
     task_type: str,
     execution_outcome: Dict[str, Any],
+    final_text: str = "",
+    execution_facts: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Apply task-type-specific lifecycle policy on top of generic outcome classes."""
     outcome = dict(execution_outcome or {})
     current = str(outcome.get("outcome_class") or "").strip().lower()
     normalized_task_type = str(task_type or "").strip().lower()
+    facts = execution_facts if isinstance(execution_facts, dict) else {}
+    text = str(final_text or "")
 
     if normalized_task_type == "evolution":
+        if _requests_owner_direction(text):
+            return build_execution_outcome(
+                OUTCOME_NEEDS_OWNER_INPUT,
+                reason="agent_requested_owner_direction",
+                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
+                productive=False,
+            )
         if current == OUTCOME_REPORT_ONLY:
             return build_execution_outcome(
                 OUTCOME_FAILED,
                 reason="evolution_requires_concrete_work_not_report_only",
+                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
+                productive=False,
+            )
+        mutating_tools = {str(item).strip().lower() for item in (facts.get("mutating_tools") or []) if str(item).strip()}
+        if current == OUTCOME_EXECUTED_WORK and mutating_tools == {"knowledge_write"}:
+            return build_execution_outcome(
+                OUTCOME_FAILED,
+                reason="evolution_knowledge_only_write_not_sufficient",
                 source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
                 productive=False,
             )

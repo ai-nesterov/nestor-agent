@@ -35,6 +35,42 @@ def test_apply_task_type_outcome_policy_fails_report_only_evolution():
     assert adjusted["outcome_reason"] == "evolution_requires_concrete_work_not_report_only"
 
 
+def test_classify_outcome_from_facts_detects_owner_direction_in_russian():
+    from ouroboros.outcome import classify_outcome_from_facts, default_execution_facts
+
+    facts = default_execution_facts()
+    facts["write_ops_total"] = 1
+    facts["mutating_tools"] = ["knowledge_write"]
+
+    outcome = classify_outcome_from_facts(
+        task_type="evolution",
+        execution_facts=facts,
+        final_text="Для Evolution #14 нужна конкретная цель. Какая цель для Evolution #14?",
+    )
+
+    assert outcome["outcome_class"] == "needs_owner_input"
+    assert outcome["productive"] is False
+
+
+def test_apply_task_type_outcome_policy_rejects_knowledge_only_evolution():
+    from ouroboros.outcome import apply_task_type_outcome_policy
+
+    adjusted = apply_task_type_outcome_policy(
+        task_type="evolution",
+        execution_outcome={
+            "outcome_class": "executed_work",
+            "outcome_reason": "mutating_tool_executed",
+            "outcome_source": "rule",
+            "productive": True,
+        },
+        final_text="Documented the new system.",
+        execution_facts={"mutating_tools": ["knowledge_write"]},
+    )
+
+    assert adjusted["outcome_class"] == "failed"
+    assert adjusted["outcome_reason"] == "evolution_knowledge_only_write_not_sufficient"
+
+
 def test_store_task_result_persists_canonical_outcome(tmp_path):
     from ouroboros.agent_task_pipeline import _store_task_result
     from ouroboros.task_results import load_task_result
