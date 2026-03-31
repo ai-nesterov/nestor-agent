@@ -55,11 +55,14 @@ export function initCosts({ ws, state }) {
     `;
     document.getElementById('content').appendChild(page);
 
-    function renderBreakdownTable(tableId, data, totalCost) {
+    function renderBreakdownTable(tableId, data, totals) {
         const tbody = document.querySelector('#' + tableId + ' tbody');
         tbody.innerHTML = '';
+        const metric = totals.displayMetric || 'cost';
+        const metricTotal = metric === 'calls' ? (totals.totalCalls || 0) : (totals.totalCost || 0);
         for (const [name, info] of Object.entries(data)) {
-            const pct = totalCost > 0 ? (info.cost / totalCost * 100) : 0;
+            const basis = metric === 'calls' ? (info.calls || 0) : (info.cost || 0);
+            const pct = metricTotal > 0 ? (basis / metricTotal * 100) : 0;
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
@@ -124,17 +127,21 @@ export function initCosts({ ws, state }) {
             const d = await resp.json();
             document.getElementById('cost-total').textContent = '$' + (d.total_cost || 0).toFixed(2);
             document.getElementById('cost-calls').textContent = d.total_calls || 0;
-            const models = Object.entries(d.by_model || {});
-            document.getElementById('cost-top-model').textContent = models.length > 0 ? models[0][0] : '-';
+            document.getElementById('cost-top-model').textContent = d.top_model || '-';
             const minimaxLimit = d.minimax_requests_5h_limit || 0;
             const minimaxUsed = d.minimax_requests_5h_used || 0;
             const minimaxRemaining = d.minimax_requests_5h_remaining;
             document.getElementById('minimax-5h-window').textContent =
                 minimaxLimit > 0 ? `${minimaxUsed} / ${minimaxLimit} (${minimaxRemaining} left)` : `${minimaxUsed} / unknown`;
-            renderBreakdownTable('cost-by-model', d.by_model || {}, d.total_cost);
-            renderBreakdownTable('cost-by-key', d.by_api_key || {}, d.total_cost);
-            renderBreakdownTable('cost-by-model-cat', d.by_model_category || {}, d.total_cost);
-            renderBreakdownTable('cost-by-task-cat', d.by_task_category || {}, d.total_cost);
+            const totals = {
+                totalCost: d.total_cost || 0,
+                totalCalls: d.total_calls || 0,
+                displayMetric: d.display_metric || 'cost',
+            };
+            renderBreakdownTable('cost-by-model', d.by_model || {}, totals);
+            renderBreakdownTable('cost-by-key', d.by_api_key || {}, totals);
+            renderBreakdownTable('cost-by-model-cat', d.by_model_category || {}, totals);
+            renderBreakdownTable('cost-by-task-cat', d.by_task_category || {}, totals);
         } catch {}
     }
 

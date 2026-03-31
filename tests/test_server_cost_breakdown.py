@@ -51,3 +51,31 @@ def test_cost_breakdown_reads_minimax_window_from_state_module(tmp_path, monkeyp
     assert payload["minimax_requests_5h_used"] == 12
     assert payload["minimax_requests_5h_limit"] == 1450
     assert payload["minimax_requests_5h_remaining"] == 1438
+
+
+def test_cost_breakdown_uses_call_metric_for_minimax_when_costs_are_zero(tmp_path, monkeypatch):
+    import server
+    import supervisor.state as st_module
+    import ouroboros.config as cfg
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "events.jsonl").write_text(
+        "\n".join([
+            json.dumps({"type": "llm_usage", "model": "MiniMax-M2.5", "provider": "minimax", "calls": 1, "cost": 0.0}),
+            json.dumps({"type": "llm_usage", "model": "MiniMax-M2.5", "provider": "minimax", "cost": 0.0}),
+            json.dumps({"type": "llm_usage", "model": "MiniMax-M2.1", "provider": "minimax", "cost": 0.0}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(server, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(st_module, "load_state", lambda: {"minimax_requests_5h_limit": 1450})
+    monkeypatch.setattr(cfg, "get_cloud_provider", lambda: "minimax")
+
+    response = __import__("asyncio").run(server.api_cost_breakdown(None))
+    payload = json.loads(response.body.decode("utf-8"))
+
+    assert payload["display_metric"] == "calls"
+    assert payload["top_model"] == "MiniMax-M2.5"
+    assert list(payload["by_model"].keys())[0] == "MiniMax-M2.5"

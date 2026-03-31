@@ -906,6 +906,7 @@ from ouroboros.config import read_version as _read_version
 async def api_cost_breakdown(request: Request) -> JSONResponse:
     """Aggregate llm_usage events from events.jsonl into cost breakdowns."""
     from supervisor.state import load_state
+    from ouroboros.config import get_cloud_provider
 
     events_path = DATA_DIR / "logs" / "events.jsonl"
     by_model: Dict[str, Dict[str, Any]] = {}
@@ -960,14 +961,34 @@ async def api_cost_breakdown(request: Request) -> JSONResponse:
     except Exception:
         pass
 
-    def _sorted(d):
-        return dict(sorted(d.items(), key=lambda x: x[1]["cost"], reverse=True))
-
     state = load_state()
+    active_provider = str(get_cloud_provider() or "").strip().lower()
+    use_calls_metric = bool(
+        active_provider == "minimax"
+        or (
+            float(total_cost or 0.0) == 0.0
+            and int(state.get("minimax_requests_5h_limit") or 0) > 0
+        )
+    )
+
+    def _sorted(d):
+        metric_key = "calls" if use_calls_metric else "cost"
+        return dict(
+            sorted(
+                d.items(),
+                key=lambda x: (x[1].get(metric_key, 0), x[1].get("calls", 0), x[0]),
+                reverse=True,
+            )
+        )
+
+    sorted_models = _sorted(by_model)
+    top_model = next(iter(sorted_models.keys()), "-")
     return JSONResponse({
         "total_cost": round(total_cost, 4),
         "total_calls": total_calls,
-        "by_model": _sorted(by_model),
+        "top_model": top_model,
+        "display_metric": "calls" if use_calls_metric else "cost",
+        "by_model": sorted_models,
         "by_api_key": _sorted(by_api_key),
         "by_model_category": _sorted(by_model_category),
         "by_task_category": _sorted(by_task_category),
