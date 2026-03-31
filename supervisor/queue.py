@@ -539,6 +539,43 @@ def queue_review_task(reason: str, force: bool = False) -> Optional[str]:
     return tid
 
 
+def _get_evolution_cooldown(outcome: str) -> int:
+    """Get cooldown duration for a given evolution outcome.
+    
+    Reads from OUROBOROS_EVOLUTION_COOLDOWN_MAP env var (JSON dict)
+    or falls back to sensible defaults.
+    
+    Default mapping:
+    - "failed": 60s (short cooldown to allow retry after transient failures)
+    - "blocked_external": 600s (10 min for external blocks)
+    - "no_actionable_goal": 1800s (30 min for idle states)
+    - "needs_owner_input": 0 (wait for owner message, handled separately)
+    - Default for unknown outcomes: 120s
+    """
+    # "needs_owner_input" is handled by the waiting_for_owner logic, not cooldown
+    if outcome == "needs_owner_input":
+        return 0
+    
+    default_cooldown_map = {
+        "failed": 60,
+        "blocked_external": 600,
+        "no_actionable_goal": 1800,
+    }
+    
+    # Try to read from environment
+    raw_map = os.environ.get("OUROBOROS_EVOLUTION_COOLDOWN_MAP")
+    if raw_map:
+        try:
+            custom_map = json.loads(raw_map)
+            if isinstance(custom_map, dict):
+                return int(custom_map.get(outcome, default_cooldown_map.get(outcome, 120)))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+    
+    # Fall back to defaults
+    return int(default_cooldown_map.get(outcome, 120))
+
+
 def enqueue_evolution_task_if_needed() -> None:
     """Enqueue evolution task if queue is empty and evolution mode is enabled.
 
@@ -580,11 +617,7 @@ def enqueue_evolution_task_if_needed() -> None:
         st["evolution_blocked_reason"] = ""
         save_state(st)
 
-    cooldown_sec = 0
-    if outcome == "blocked_external":
-        cooldown_sec = int(os.environ.get("OUROBOROS_EVOLUTION_BLOCKED_COOLDOWN_SEC", "600") or "600")
-    elif outcome == "no_actionable_goal":
-        cooldown_sec = int(os.environ.get("OUROBOROS_EVOLUTION_IDLE_COOLDOWN_SEC", "1800") or "1800")
+    cooldown_sec = _get_evolution_cooldown(outcome)
     if cooldown_sec > 0 and outcome_ts is not None and (time.time() - outcome_ts) < cooldown_sec:
         return
 
