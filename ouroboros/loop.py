@@ -34,6 +34,7 @@ from supervisor.state import get_provider_quota_status
 from ouroboros.outcome import (
     classify_outcome_from_facts,
     default_execution_facts,
+    maybe_adjudicate_outcome_with_model,
 )
 
 # Backward-compat alias for source-inspecting and monkeypatched tests
@@ -113,6 +114,12 @@ def _finalize_loop_return(
         task_type=str(llm_trace.get("task_type") or ""),
         execution_facts=facts,
         final_text=text,
+    )
+    outcome = maybe_adjudicate_outcome_with_model(
+        task_type=str(llm_trace.get("task_type") or ""),
+        execution_facts=facts,
+        final_text=text,
+        deterministic_outcome=outcome,
     )
     return text, accumulated_usage, llm_trace, outcome
 

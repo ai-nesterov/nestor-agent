@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any, Dict
 
 
@@ -193,3 +195,69 @@ def classify_outcome_from_facts(
         reason="non_mutating_completion_requires_adjudication",
         productive=False,
     )
+
+
+def maybe_adjudicate_outcome_with_model(
+    *,
+    task_type: str,
+    execution_facts: Dict[str, Any],
+    final_text: str,
+    deterministic_outcome: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Use a small model only for ambiguous semantic cases."""
+    outcome_class = str((deterministic_outcome or {}).get("outcome_class") or "").strip().lower()
+    outcome_reason = str((deterministic_outcome or {}).get("outcome_reason") or "").strip().lower()
+    if outcome_class != OUTCOME_REPORT_ONLY or outcome_reason != "non_mutating_completion_requires_adjudication":
+        return deterministic_outcome
+
+    if str(os.environ.get("OUROBOROS_ENABLE_OUTCOME_ADJUDICATION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+        return deterministic_outcome
+
+    facts = execution_facts if isinstance(execution_facts, dict) else default_execution_facts()
+    prompt = (
+        "Classify this Ouroboros task completion. Use only one of these labels: "
+        "verified_no_change_needed, needs_owner_input, blocked_external, report_only.\n"
+        "Return strict JSON with keys outcome_class and outcome_reason.\n\n"
+        f"task_type={str(task_type or '').strip().lower() or 'task'}\n"
+        f"execution_facts={json.dumps(facts, ensure_ascii=False, sort_keys=True)}\n"
+        f"final_text={json.dumps(str(final_text or '')[:2000], ensure_ascii=False)}\n"
+    )
+
+    try:
+        from ouroboros.config import get_lane_model, use_local_for_lane
+        from ouroboros.llm import DEFAULT_LIGHT_MODEL, LLMClient
+
+        use_local_light = use_local_for_lane("LIGHT")
+        light_model = get_lane_model("LIGHT", prefer_local=use_local_light) or DEFAULT_LIGHT_MODEL
+        client = LLMClient()
+        msg, _usage = client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            model=light_model,
+            reasoning_effort="low",
+            max_tokens=200,
+            use_local=use_local_light,
+        )
+        content = str((msg or {}).get("content") or "").strip()
+        if not content:
+            return deterministic_outcome
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return deterministic_outcome
+        payload = json.loads(content[start:end + 1])
+        candidate = str(payload.get("outcome_class") or "").strip().lower()
+        reason = str(payload.get("outcome_reason") or "").strip()
+        if candidate not in {
+            OUTCOME_VERIFIED_NO_CHANGE,
+            OUTCOME_NEEDS_OWNER_INPUT,
+            OUTCOME_BLOCKED_EXTERNAL,
+            OUTCOME_REPORT_ONLY,
+        }:
+            return deterministic_outcome
+        return build_execution_outcome(
+            candidate,
+            reason=reason or "model_adjudicated_ambiguous_completion",
+            source=OUTCOME_SOURCE_MODEL,
+        )
+    except Exception:
+        return deterministic_outcome
