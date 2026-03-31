@@ -31,6 +31,7 @@ from ouroboros.loop_tool_execution import (
 from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, estimate_cost
 from ouroboros.structured_output import strip_reasoning_artifacts
 from supervisor.state import get_provider_quota_status
+from ouroboros.outcome import default_execution_facts
 
 # Backward-compat alias for source-inspecting and monkeypatched tests
 _call_llm_with_retry = call_llm_with_retry
@@ -314,7 +315,12 @@ def run_llm_loop(
     active_effort = initial_effort
     active_use_local = use_local_for_lane("MAIN")
 
-    llm_trace: Dict[str, Any] = {"reasoning_notes": [], "tool_calls": []}
+    llm_trace: Dict[str, Any] = {
+        "reasoning_notes": [],
+        "tool_calls": [],
+        "execution_facts": default_execution_facts(),
+    }
+    llm_trace["execution_facts"]["executor_used"] = "ouroboros"
     accumulated_usage: Dict[str, Any] = {}
     max_retries = 3
     from ouroboros.tools import tool_discovery as _td
@@ -413,8 +419,12 @@ def run_llm_loop(
                 active_effort = _pre_checkpoint_effort
 
             if msg is None:
+                llm_trace["execution_facts"]["empty_model_responses"] = int(
+                    llm_trace["execution_facts"].get("empty_model_responses") or 0
+                ) + 1
                 fallback_candidates = _build_fallback_candidates(active_model, active_use_local)
                 if not fallback_candidates:
+                    llm_trace["execution_facts"]["fallback_exhausted"] = True
                     local_tag = " (local)" if active_use_local else ""
                     return (
                         f"⚠️ Failed to get a response from model {active_model}{local_tag} after {max_retries} attempts. "
@@ -446,6 +456,8 @@ def run_llm_loop(
                         break
 
                 if msg is None:
+                    llm_trace["execution_facts"]["fallback_exhausted"] = True
+                    llm_trace["execution_facts"]["provider_blocked"] = True
                     fallback_tag = " (local)" if last_fallback_use_local else ""
                     return (
                         f"⚠️ All models are down. Primary ({active_model}{primary_tag}) and fallback ({last_fallback_model}{fallback_tag}) "
@@ -456,6 +468,10 @@ def run_llm_loop(
             tool_calls = msg.get("tool_calls") or []
             content = msg.get("content")
             reasoning = msg.get("reasoning")
+            llm_trace["execution_facts"]["assistant_messages_total"] = int(
+                llm_trace["execution_facts"].get("assistant_messages_total") or 0
+            ) + 1
+            llm_trace["execution_facts"]["rounds_total"] = round_idx
             if not tool_calls:
                 return _handle_text_response(content, reasoning, llm_trace, accumulated_usage)
 

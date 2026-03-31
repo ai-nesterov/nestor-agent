@@ -44,6 +44,7 @@ from ouroboros.agent_startup_checks import (
 from ouroboros.agent_task_pipeline import (
     build_trace_summary, emit_task_results, build_review_context,
 )
+from ouroboros.outcome import default_execution_facts
 from ouroboros.task_results import STATUS_RUNNING, write_task_result
 
 
@@ -263,7 +264,11 @@ class OuroborosAgent:
             budget_remaining = cap_info.get("budget_remaining")
 
             usage: Dict[str, Any] = {}
-            llm_trace: Dict[str, Any] = {"reasoning_notes": [], "tool_calls": []}
+            llm_trace: Dict[str, Any] = {
+                "reasoning_notes": [],
+                "tool_calls": [],
+                "execution_facts": default_execution_facts(),
+            }
 
             task_type_str = str(task.get("type") or "").lower()
             initial_effort = resolve_effort(task_type_str)

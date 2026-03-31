@@ -53,6 +53,17 @@ _UNTRUNCATED_REPO_READ_PATHS = frozenset({
     "docs/DEVELOPMENT.md",
 })
 
+_WRITE_TOOL_NAMES = frozenset({
+    "repo_write", "repo_write_commit", "repo_commit", "data_write",
+    "knowledge_write", "update_scratchpad", "update_identity",
+    "str_replace_editor", "apply_task_patch", "discard_task_patch",
+})
+_READ_TOOL_NAMES = frozenset({
+    "repo_read", "repo_list", "data_read", "data_list", "knowledge_read",
+    "knowledge_list", "web_search", "chat_history", "git_status", "git_diff",
+    "wait_for_task", "get_task_result", "validate_executor_result",
+})
+
 
 def _emit_live_log(tools: ToolRegistry, payload: Dict[str, Any]) -> None:
     event_queue = getattr(getattr(tools, "_ctx", None), "event_queue", None)
@@ -436,6 +447,7 @@ def process_tool_results(
     for exec_result in results:
         fn_name = exec_result["fn_name"]
         is_error = exec_result["is_error"]
+        facts = llm_trace.setdefault("execution_facts", {})
 
         if is_error:
             error_count += 1
@@ -458,6 +470,30 @@ def process_tool_results(
             "result": truncate_for_log(exec_result["result"], 700),
             "is_error": is_error,
         })
+        facts["tool_calls_total"] = int(facts.get("tool_calls_total") or 0) + 1
+        if is_error:
+            facts["tool_errors_total"] = int(facts.get("tool_errors_total") or 0) + 1
+        if fn_name in _READ_TOOL_NAMES:
+            facts["read_ops_total"] = int(facts.get("read_ops_total") or 0) + 1
+        if fn_name in _WRITE_TOOL_NAMES:
+            facts["write_ops_total"] = int(facts.get("write_ops_total") or 0) + 1
+            mutating = list(facts.get("mutating_tools") or [])
+            if fn_name not in mutating:
+                mutating.append(fn_name)
+            facts["mutating_tools"] = mutating
+        if fn_name == "schedule_task":
+            facts["scheduled_task_calls"] = int(facts.get("scheduled_task_calls") or 0) + 1
+            facts["subtasks_spawned"] = int(facts.get("subtasks_spawned") or 0) + 1
+        elif fn_name == "wait_for_task":
+            facts["wait_for_task_calls"] = int(facts.get("wait_for_task_calls") or 0) + 1
+        elif fn_name == "get_task_result":
+            facts["get_task_result_calls"] = int(facts.get("get_task_result_calls") or 0) + 1
+        elif fn_name == "apply_task_patch":
+            facts["apply_task_patch_calls"] = int(facts.get("apply_task_patch_calls") or 0) + 1
+        elif fn_name == "validate_executor_result":
+            facts["validate_executor_result_calls"] = int(facts.get("validate_executor_result_calls") or 0) + 1
+        elif fn_name == "repo_commit":
+            facts["repo_commit_calls"] = int(facts.get("repo_commit_calls") or 0) + 1
 
     return error_count
 
