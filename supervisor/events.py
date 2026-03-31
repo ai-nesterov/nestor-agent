@@ -11,6 +11,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -33,6 +34,29 @@ _PARENT_CONTEXT_MARKER = "[BEGIN_PARENT_CONTEXT"
 _PARENT_CONTEXT_END = "[END_PARENT_CONTEXT]"
 _ALLOWED_EXECUTORS = {"ouroboros", "claude_code", "codex"}
 _ALLOWED_BUDGET_DECISIONS = {"auto", "defer", "force_run"}
+_TRACE_HEADER_RE = re.compile(r"## Tool trace \((\d+) calls, (\d+) errors\)")
+_OWNER_INPUT_PATTERNS = (
+    "what would you like me to do",
+    "what should i work on",
+    "what's the goal",
+    "want me to proceed",
+    "что выбираешь",
+    "что бы ты хотел",
+    "что бы ты хотел чтобы я сделал",
+    "хочешь, чтобы я",
+    "какую цель",
+    "какой goal",
+    "which goal should i work on",
+)
+_BLOCKED_PATTERNS = (
+    "all models are down",
+    "provider is back",
+    "provider errors",
+    "returned no response",
+    "quota blocked",
+    "soft limited",
+    "hard blocked",
+)
 
 
 def _normalize_description(text: str) -> str:
@@ -372,26 +396,26 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     # Track evolution task success/failure for circuit breaker
     if task_type == "evolution":
         st = ctx.load_state()
-        # Check if task produced meaningful output (successful evolution)
-        # A successful evolution should have:
-        # - Reasonable cost (not near-zero, indicating actual work)
-        # - Multiple rounds (not just 1 retry)
-        cost = float(evt.get("cost_usd") or 0)
-        rounds = int(evt.get("total_rounds") or 0)
+        result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
+        outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
+        st["evolution_last_outcome"] = outcome
+        st["evolution_last_outcome_at"] = evt.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        st["evolution_blocked_reason"] = blocked_reason
 
-        evo_cost_threshold = float(os.environ.get("OUROBOROS_EVO_COST_THRESHOLD", "0.10"))
-        if cost > evo_cost_threshold and rounds >= 1:
-            # Success: reset failure counter
+        if outcome in {"executed_work", "scheduled_followup", "committed"}:
             st["evolution_consecutive_failures"] = 0
+            st["evolution_waiting_for_owner"] = False
             ctx.save_state(st)
-        elif rounds == 0:
-            # Task never started or was rejected immediately - don't count as failure
-            # This prevents false failures when task is simply not scheduled
-            pass
+        elif outcome == "needs_owner_input":
+            st["evolution_waiting_for_owner"] = True
+            ctx.save_state(st)
+        elif outcome in {"no_actionable_goal", "blocked_external"}:
+            st["evolution_waiting_for_owner"] = False
+            ctx.save_state(st)
         else:
-            # Likely failure (empty response or minimal work)
             failures = int(st.get("evolution_consecutive_failures") or 0) + 1
             st["evolution_consecutive_failures"] = failures
+            st["evolution_waiting_for_owner"] = False
             ctx.save_state(st)
             ctx.append_jsonl(
                 ctx.DRIVE_ROOT / "logs" / "supervisor.jsonl",
@@ -400,10 +424,20 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     "type": "evolution_task_failure_tracked",
                     "task_id": task_id,
                     "consecutive_failures": failures,
-                    "cost_usd": cost,
-                    "rounds": rounds,
+                    "outcome": outcome,
                 },
             )
+
+        ctx.append_jsonl(
+            ctx.DRIVE_ROOT / "logs" / "supervisor.jsonl",
+            {
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "type": "evolution_outcome_classified",
+                "task_id": task_id,
+                "outcome": outcome,
+                "blocked_reason": blocked_reason,
+            },
+        )
 
     if task_id:
         ctx.RUNNING.pop(str(task_id), None)
@@ -464,6 +498,53 @@ def _handle_task_metrics(evt: Dict[str, Any], ctx: Any) -> None:
             "tool_errors": int(evt.get("tool_errors") or 0),
         },
     )
+
+
+def _trace_counts(trace_summary: str) -> tuple[int, int]:
+    raw = str(trace_summary or "")
+    match = _TRACE_HEADER_RE.search(raw)
+    if not match:
+        return 0, 0
+    try:
+        return int(match.group(1)), int(match.group(2))
+    except Exception:
+        return 0, 0
+
+
+def _classify_evolution_outcome(
+    result_payload: Optional[Dict[str, Any]],
+    evt: Dict[str, Any],
+) -> tuple[str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    result_text = str(payload.get("result") or "").strip()
+    trace_summary = str(payload.get("trace_summary") or "")
+    tool_calls, tool_errors = _trace_counts(trace_summary)
+    lowered = result_text.lower()
+    rounds = int(evt.get("total_rounds") or 0)
+
+    if rounds == 0:
+        return "failed", "task_never_started"
+
+    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
+        return "blocked_external", "provider_or_quota_block"
+
+    if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS):
+        return "needs_owner_input", "agent_requested_owner_direction"
+
+    if tool_calls > 0:
+        if "schedule_task(" in trace_summary or "wait_for_task(" in trace_summary:
+            return "scheduled_followup", ""
+        if "repo_commit(" in trace_summary:
+            return "committed", ""
+        return "executed_work", ""
+
+    if tool_errors > 0:
+        return "failed", "tool_errors_without_progress"
+
+    if result_text:
+        return "no_actionable_goal", "status_only_or_reflection_only"
+
+    return "failed", "empty_result"
 
 
 def _handle_review_request(evt: Dict[str, Any], ctx: Any) -> None:

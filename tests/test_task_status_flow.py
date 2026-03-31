@@ -322,3 +322,48 @@ def test_handle_task_done_clears_worker_busy_without_worker_id(tmp_path):
 
     assert "t-orphan" not in _Ctx.RUNNING
     assert _Ctx.WORKERS[1].busy_task_id is None
+
+
+def test_classify_evolution_outcome_detects_owner_input_request():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_evolution_outcome(
+        {
+            "result": "What would you like me to do next?",
+            "trace_summary": "## Tool trace (0 calls, 0 errors)\nNo tool calls.",
+        },
+        {"total_rounds": 1},
+    )
+
+    assert outcome == "needs_owner_input"
+    assert reason == "agent_requested_owner_direction"
+
+
+def test_classify_evolution_outcome_detects_executed_work():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_evolution_outcome(
+        {
+            "result": "Patched and verified the target file.",
+            "trace_summary": "## Tool trace (2 calls, 0 errors)\n1. repo_read(path='a')\n2. knowledge_write(topic='x')",
+        },
+        {"total_rounds": 2},
+    )
+
+    assert outcome == "executed_work"
+    assert reason == ""
+
+
+def test_classify_evolution_outcome_detects_status_only_cycle():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_evolution_outcome(
+        {
+            "result": "Current status: all critical fixes are in place.",
+            "trace_summary": "## Tool trace (0 calls, 0 errors)\nNo tool calls.",
+        },
+        {"total_rounds": 1},
+    )
+
+    assert outcome == "no_actionable_goal"
+    assert reason == "status_only_or_reflection_only"
