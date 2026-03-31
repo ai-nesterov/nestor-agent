@@ -231,6 +231,13 @@ class TestParseReviewJson:
         result = review._parse_review_json(data)
         assert result is not None
 
+    def test_think_and_fenced_json(self):
+        review = _get_review_module()
+        data = '<think>reasoning</think>\n```json\n[{"item":"x","verdict":"PASS","severity":"critical","reason":"ok"}]\n```'
+        result = review._parse_review_json(data)
+        assert result is not None
+        assert result[0]["item"] == "x"
+
     def test_invalid_json(self):
         review = _get_review_module()
         result = review._parse_review_json("not json at all")

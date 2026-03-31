@@ -18,6 +18,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from ouroboros.llm import LLMClient
+from ouroboros.structured_output import extract_json_array, extract_json_object
 from ouroboros.utils import utc_now_iso, run_cmd, append_jsonl
 from ouroboros import config as _cfg
 from ouroboros.tools.registry import ToolEntry, ToolContext
@@ -325,20 +326,7 @@ def _required_successful_reviews(review_executor: str, reviewer_count: int) -> i
 
 
 def _extract_last_json_object(text: str) -> Optional[Dict[str, object]]:
-    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
-    for candidate in reversed(lines):
-        if candidate.startswith("{") and candidate.endswith("}"):
-            try:
-                payload = json.loads(candidate)
-            except Exception:
-                continue
-            if isinstance(payload, dict):
-                return payload
-    try:
-        payload = json.loads(str(text or "").strip())
-    except Exception:
-        return None
-    return payload if isinstance(payload, dict) else None
+    return extract_json_object(text)
 
 
 def _extract_review_text(raw_text: str, payload: Optional[Dict[str, object]] = None) -> str:
@@ -705,24 +693,7 @@ and "reason" (one-line explanation).
 
 def _parse_review_json(raw: str) -> Optional[list]:
     """Best-effort extraction of a JSON array from model output."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            return obj
-    except (json.JSONDecodeError, ValueError):
-        pass
-    start, end = text.find("["), text.rfind("]")
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(text[start:end + 1])
-            if isinstance(obj, list):
-                return obj
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return None
+    return extract_json_array(raw)
 
 
 def _preflight_check(commit_message: str, staged_files: str,
