@@ -31,7 +31,12 @@ from ouroboros.loop_tool_execution import (
 from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, estimate_cost
 from ouroboros.structured_output import strip_reasoning_artifacts
 from supervisor.state import get_provider_quota_status
-from ouroboros.outcome import default_execution_facts
+from ouroboros.outcome import (
+    OUTCOME_FAILED,
+    OUTCOME_SOURCE_RULE,
+    build_execution_outcome,
+    default_execution_facts,
+)
 
 # Backward-compat alias for source-inspecting and monkeypatched tests
 _call_llm_with_retry = call_llm_with_retry
@@ -78,14 +83,42 @@ def _handle_text_response(
     reasoning: Optional[str],
     llm_trace: Dict[str, Any],
     accumulated_usage: Dict[str, Any],
-) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """Handle LLM response without tool calls (final response)."""
     cleaned = strip_reasoning_artifacts(content or "")
     reasoning_text = strip_reasoning_artifacts(reasoning or "")
     note = reasoning_text or cleaned
     if note:
         llm_trace["reasoning_notes"].append(note)
-    return cleaned, accumulated_usage, llm_trace
+    facts = llm_trace.setdefault("execution_facts", default_execution_facts())
+    facts["final_text_present"] = bool(cleaned.strip())
+    facts["final_text_length"] = len(cleaned)
+    execution_outcome = build_execution_outcome(
+        OUTCOME_FAILED,
+        reason="unclassified_runtime_result",
+        source=OUTCOME_SOURCE_RULE,
+        productive=False,
+    )
+    return cleaned, accumulated_usage, llm_trace, execution_outcome
+
+
+def _finalize_loop_return(
+    final_text: str,
+    accumulated_usage: Dict[str, Any],
+    llm_trace: Dict[str, Any],
+    execution_outcome: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    facts = llm_trace.setdefault("execution_facts", default_execution_facts())
+    text = str(final_text or "")
+    facts["final_text_present"] = bool(text.strip())
+    facts["final_text_length"] = len(text)
+    outcome = execution_outcome or build_execution_outcome(
+        OUTCOME_FAILED,
+        reason="unclassified_runtime_result",
+        source=OUTCOME_SOURCE_RULE,
+        productive=False,
+    )
+    return text, accumulated_usage, llm_trace, outcome
 
 
 def _check_budget_limits(
@@ -103,13 +136,13 @@ def _check_budget_limits(
     llm_trace: Dict[str, Any],
     task_type: str = "task",
     use_local: bool = False,
-) -> Optional[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
+) -> Optional[Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
     """
     Check budget limits and handle budget overrun.
 
     Returns:
         None if budget is OK (continue loop)
-        (final_text, accumulated_usage, llm_trace) if budget exceeded (stop loop)
+        (final_text, accumulated_usage, llm_trace, execution_outcome) if budget exceeded (stop loop)
     """
     if budget_remaining_usd is None:
         return None
@@ -118,7 +151,7 @@ def _check_budget_limits(
 
     if budget_remaining_usd <= 0:
         finish_reason = f"🚫 Task rejected. Total budget exhausted. Please increase TOTAL_BUDGET in settings."
-        return finish_reason, accumulated_usage, llm_trace
+        return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
 
     budget_pct = task_cost / budget_remaining_usd if budget_remaining_usd > 0 else 1.0
 
@@ -139,11 +172,11 @@ def _check_budget_limits(
                 use_local=use_local,
             )
             if final_msg:
-                return (final_msg.get("content") or finish_reason), accumulated_usage, llm_trace
-            return finish_reason, accumulated_usage, llm_trace
+                return _finalize_loop_return(final_msg.get("content") or finish_reason, accumulated_usage, llm_trace)
+            return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
         except Exception:
             log.warning("Failed to get final response after budget limit", exc_info=True)
-            return finish_reason, accumulated_usage, llm_trace
+            return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
     elif budget_pct > 0.3 and round_idx % 10 == 0:
         messages.append({"role": "user", "content": f"[INFO] Task spent ${task_cost:.3f} of ${budget_remaining_usd:.2f}. Wrap up if possible."})
 
@@ -302,14 +335,14 @@ def run_llm_loop(
     event_queue: Optional[queue.Queue] = None,
     initial_effort: str = "medium",
     drive_root: Optional[pathlib.Path] = None,
-) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
     Core LLM-with-tools loop.
 
     Sends messages to LLM, executes tool calls, retries on errors.
     LLM controls model/effort via switch_model tool (LLM-first, Bible P3).
 
-    Returns: (final_text, accumulated_usage, llm_trace)
+    Returns: (final_text, accumulated_usage, llm_trace, execution_outcome)
     """
     active_model = get_lane_model("MAIN")
     active_effort = initial_effort
@@ -354,11 +387,11 @@ def run_llm_loop(
                         use_local=active_use_local,
                     )
                     if final_msg:
-                        return (final_msg.get("content") or finish_reason), accumulated_usage, llm_trace
-                    return finish_reason, accumulated_usage, llm_trace
+                        return _finalize_loop_return(final_msg.get("content") or finish_reason, accumulated_usage, llm_trace)
+                    return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
                 except Exception:
                     log.warning("Failed to get final response after round limit", exc_info=True)
-                    return finish_reason, accumulated_usage, llm_trace
+                    return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
 
             _checkpoint_injected = _maybe_inject_self_check(round_idx, MAX_ROUNDS, messages, accumulated_usage, emit_progress)
 
@@ -426,11 +459,11 @@ def run_llm_loop(
                 if not fallback_candidates:
                     llm_trace["execution_facts"]["fallback_exhausted"] = True
                     local_tag = " (local)" if active_use_local else ""
-                    return (
+                    return _finalize_loop_return(
                         f"⚠️ Failed to get a response from model {active_model}{local_tag} after {max_retries} attempts. "
                         f"No viable fallback model configured. "
                         f"If background consciousness is running, it will retry when the provider recovers."
-                    ), accumulated_usage, llm_trace
+                    , accumulated_usage, llm_trace)
 
                 primary_tag = " (local)" if active_use_local else ""
                 last_fallback_model = ""
@@ -459,11 +492,11 @@ def run_llm_loop(
                     llm_trace["execution_facts"]["fallback_exhausted"] = True
                     llm_trace["execution_facts"]["provider_blocked"] = True
                     fallback_tag = " (local)" if last_fallback_use_local else ""
-                    return (
+                    return _finalize_loop_return(
                         f"⚠️ All models are down. Primary ({active_model}{primary_tag}) and fallback ({last_fallback_model}{fallback_tag}) "
                         f"both returned no response. Stopping. "
                         f"Background consciousness will attempt recovery when the provider is back."
-                    ), accumulated_usage, llm_trace
+                    , accumulated_usage, llm_trace)
 
             tool_calls = msg.get("tool_calls") or []
             content = msg.get("content")

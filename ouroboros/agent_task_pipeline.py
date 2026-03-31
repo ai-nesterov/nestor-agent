@@ -88,6 +88,7 @@ def emit_task_results(
     pending_events: List[Dict[str, Any]],
     task: Dict[str, Any], text: str,
     usage: Dict[str, Any], llm_trace: Dict[str, Any],
+    execution_outcome: Dict[str, Any] | None,
     start_time: float, drive_logs: pathlib.Path,
 ) -> None:
     """Emit all end-of-task events to supervisor and run post-task processing."""
@@ -170,7 +171,7 @@ def emit_task_results(
         "completion_tokens": int(usage.get("completion_tokens") or 0),
     })
 
-    _store_task_result(env, task, text, usage, llm_trace)
+    _store_task_result(env, task, text, usage, llm_trace, execution_outcome)
     _run_task_summary(env, llm, task, usage, llm_trace, drive_logs)
     _run_chat_consolidation(env, memory, llm, task, drive_logs)
     _run_scratchpad_consolidation(env, memory, llm)
@@ -178,7 +179,8 @@ def emit_task_results(
 
 
 def _store_task_result(env: Any, task: Dict[str, Any], text: str,
-                       usage: Dict[str, Any], llm_trace: Dict[str, Any]) -> None:
+                       usage: Dict[str, Any], llm_trace: Dict[str, Any],
+                       execution_outcome: Dict[str, Any] | None) -> None:
     """Store task result for parent task retrieval."""
     try:
         trace_summary = build_trace_summary(llm_trace)
@@ -191,6 +193,7 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             context=task.get("context"),
             result=text or "",
             trace_summary=trace_summary,
+            execution_outcome=execution_outcome or {},
             cost_usd=round(float(usage.get("cost") or 0), 6),
             total_rounds=int(usage.get("rounds") or 0),
             ts=utc_now_iso(),

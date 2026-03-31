@@ -274,7 +274,7 @@ class OuroborosAgent:
             initial_effort = resolve_effort(task_type_str)
 
             try:
-                text, usage, llm_trace = run_llm_loop(
+                text, usage, llm_trace, execution_outcome = run_llm_loop(
                     messages=messages,
                     tools=self.tools,
                     llm=self.llm,
@@ -306,6 +306,7 @@ class OuroborosAgent:
                     )
                 except Exception:
                     pass
+                execution_outcome = None
 
             if not isinstance(text, str) or not text.strip():
                 text = "⚠️ Model returned an empty response. Try rephrasing your request."
@@ -313,7 +314,7 @@ class OuroborosAgent:
             emit_task_results(
                 self.env, self.memory, self.llm,
                 self._pending_events, task, text,
-                usage, llm_trace, start_time, drive_logs,
+                usage, llm_trace, execution_outcome, start_time, drive_logs,
             )
             return list(self._pending_events)
 
