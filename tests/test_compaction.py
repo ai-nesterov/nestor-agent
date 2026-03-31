@@ -1,5 +1,9 @@
 """Tests for tool-history compaction protection (context_compaction.py)."""
-from ouroboros.context_compaction import compact_tool_history, _COMPACTION_PROTECTED_TOOLS
+from ouroboros.context_compaction import (
+    _parse_compaction_summary_text,
+    compact_tool_history,
+    compact_tool_history_llm,
+)
 
 
 def _make_messages(tool_name: str, result_content: str, num_rounds: int = 8):
@@ -83,3 +87,39 @@ def test_old_assistant_tool_payloads_are_compacted():
         and "<<CONTENT_OMITTED len=" in m["tool_calls"][0]["function"]["arguments"]
     ]
     assert len(compacted_assistants) >= 4, "Old oversized assistant tool-call payloads should be compacted"
+
+
+def test_parse_compaction_summary_tolerates_marker_variants():
+    summary_map = _parse_compaction_summary_text(
+        "[round:23]: First summary line.\n"
+        "Still same round.\n"
+        "[ round : 26 ]\n"
+        "Second summary.\n"
+    )
+
+    assert summary_map == {
+        23: "First summary line. Still same round.",
+        26: "Second summary.",
+    }
+
+
+def test_compact_tool_history_llm_accepts_inline_marker_text(monkeypatch):
+    msgs = _make_messages("run_shell", "ok", num_rounds=10)
+
+    def _fake_summarize(rendered_blocks):
+        return ({
+            start: f"summary for {start}"
+            for start, _ in rendered_blocks
+        }, {"total_tokens": 42})
+
+    monkeypatch.setattr("ouroboros.context_compaction._summarize_round_batch", _fake_summarize)
+
+    compacted, usage = compact_tool_history_llm(msgs, keep_recent=3)
+
+    compacted_blocks = [
+        m["content"] for m in compacted
+        if m.get("role") == "assistant" and str(m.get("content", "")).startswith("[Compacted reasoning block]")
+    ]
+    assert len(compacted_blocks) == 7
+    assert "summary for 1" in compacted_blocks[0]
+    assert usage == {"total_tokens": 42}

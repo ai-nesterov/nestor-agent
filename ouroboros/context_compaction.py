@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from ouroboros.config import get_lane_model, use_local_for_lane
 
@@ -26,6 +27,7 @@ _COMPACTION_PROTECTED_TOOLS = frozenset({
 
 _SUMMARY_INPUT_LIMIT = 2500
 _BLOCKS_PER_BATCH = 8
+_ROUND_MARKER_RE = re.compile(r"^\[\s*round\s*:\s*(\d+)\s*\]\s*:?\s*(.*)$", re.IGNORECASE)
 
 
 def _find_tool_name_for_result(msg: dict, messages: list) -> str:
@@ -195,7 +197,8 @@ def _summarize_round_batch(
         "Summarize each reasoning round block below. Preserve: user steering, "
         "key hypotheses, tools used only when relevant, outcomes, what changed, "
         "and the next step or open question. Write as Ouroboros in first person. "
-        "Keep each summary to 3-6 sentences. Output one block per [round:id] in the same order.\n\n"
+        "Keep each summary to 3-6 sentences. Output one block per [round:id] in the same order. "
+        "Begin every block with the exact marker format [round:NUMBER] on its own line.\n\n"
         + batch_text
     )
 
@@ -215,26 +218,36 @@ def _summarize_round_batch(
     if not summary_text.strip():
         raise ValueError("empty summary response")
 
+    summary_map = _parse_compaction_summary_text(summary_text)
+
+    return summary_map, usage
+
+
+def _parse_compaction_summary_text(summary_text: str) -> Dict[int, str]:
+    """Parse LLM compaction output while tolerating minor marker formatting drift."""
     summary_map: Dict[int, str] = {}
     current_round: Optional[int] = None
     current_lines: list[str] = []
-    for line in summary_text.strip().splitlines():
+
+    for line in str(summary_text or "").strip().splitlines():
         stripped = line.strip()
-        if stripped.startswith("[round:") and stripped.endswith("]"):
+        marker = _ROUND_MARKER_RE.match(stripped)
+        if marker:
             if current_round is not None:
                 summary_map[current_round] = " ".join(current_lines).strip()
+            current_round = int(marker.group(1))
             current_lines = []
-            try:
-                current_round = int(stripped[len("[round:"):-1])
-            except ValueError:
-                current_round = None
+            trailing = marker.group(2).strip()
+            if trailing:
+                current_lines.append(trailing)
             continue
         if current_round is not None:
             current_lines.append(stripped)
+
     if current_round is not None:
         summary_map[current_round] = " ".join(current_lines).strip()
 
-    return summary_map, usage
+    return summary_map
 
 
 def compact_tool_history_llm(
