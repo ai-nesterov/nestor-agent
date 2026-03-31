@@ -17,6 +17,7 @@ import time
 from typing import Any, Dict, List
 
 from ouroboros.task_results import STATUS_COMPLETED, write_task_result
+from ouroboros.outcome import build_execution_outcome, OUTCOME_FAILED
 from ouroboros.utils import utc_now_iso, append_jsonl
 from ouroboros.structured_output import strip_reasoning_artifacts
 
@@ -184,6 +185,12 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
     """Store task result for parent task retrieval."""
     try:
         trace_summary = build_trace_summary(llm_trace)
+        facts = llm_trace.get("execution_facts") if isinstance(llm_trace, dict) else {}
+        outcome = execution_outcome or build_execution_outcome(
+            OUTCOME_FAILED,
+            reason="missing_runtime_outcome",
+            productive=False,
+        )
         write_task_result(
             env.drive_root,
             str(task.get("id") or ""),
@@ -193,7 +200,12 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             context=task.get("context"),
             result=text or "",
             trace_summary=trace_summary,
-            execution_outcome=execution_outcome or {},
+            execution_facts=facts if isinstance(facts, dict) else {},
+            execution_outcome=outcome,
+            outcome_class=outcome.get("outcome_class"),
+            outcome_reason=outcome.get("outcome_reason"),
+            outcome_source=outcome.get("outcome_source"),
+            productive=bool(outcome.get("productive")),
             cost_usd=round(float(usage.get("cost") or 0), 6),
             total_rounds=int(usage.get("rounds") or 0),
             ts=utc_now_iso(),

@@ -45,6 +45,7 @@ from ouroboros.agent_task_pipeline import (
     build_trace_summary, emit_task_results, build_review_context,
 )
 from ouroboros.outcome import default_execution_facts
+from ouroboros.outcome import build_execution_outcome, OUTCOME_FAILED
 from ouroboros.task_results import STATUS_RUNNING, write_task_result
 
 
@@ -303,6 +304,16 @@ class OuroborosAgent:
                         str(task.get("id") or ""),
                         STATUS_FAILED,
                         result=text,
+                        execution_facts=llm_trace.get("execution_facts") if isinstance(llm_trace, dict) else {},
+                        execution_outcome=build_execution_outcome(
+                            OUTCOME_FAILED,
+                            reason="task_loop_exception",
+                            productive=False,
+                        ),
+                        outcome_class=OUTCOME_FAILED,
+                        outcome_reason="task_loop_exception",
+                        outcome_source="rule",
+                        productive=False,
                     )
                 except Exception:
                     pass
