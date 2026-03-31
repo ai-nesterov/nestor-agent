@@ -26,6 +26,7 @@ from ouroboros.task_results import (
     write_task_result,
 )
 from ouroboros.outcome import ALL_OUTCOME_CLASSES, OUTCOME_SOURCE_FALLBACK_SUPERVISOR
+from ouroboros.outcome import apply_task_type_outcome_policy
 
 # Lazy imports to avoid circular dependencies — everything comes through ctx
 
@@ -408,6 +409,17 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         else:
             outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
             outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
+        policy_adjusted = apply_task_type_outcome_policy(
+            task_type=task_type,
+            execution_outcome={
+                "outcome_class": outcome,
+                "outcome_reason": blocked_reason,
+                "outcome_source": outcome_source,
+            },
+        )
+        outcome = str(policy_adjusted.get("outcome_class") or outcome)
+        blocked_reason = str(policy_adjusted.get("outcome_reason") or blocked_reason)
+        outcome_source = str(policy_adjusted.get("outcome_source") or outcome_source)
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),
@@ -469,6 +481,17 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         else:
             outcome, blocked_reason = _classify_task_outcome(result_payload, evt)
             outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
+        policy_adjusted = apply_task_type_outcome_policy(
+            task_type=task_type,
+            execution_outcome={
+                "outcome_class": outcome,
+                "outcome_reason": blocked_reason,
+                "outcome_source": outcome_source,
+            },
+        )
+        outcome = str(policy_adjusted.get("outcome_class") or outcome)
+        blocked_reason = str(policy_adjusted.get("outcome_reason") or blocked_reason)
+        outcome_source = str(policy_adjusted.get("outcome_source") or outcome_source)
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),

@@ -32,6 +32,7 @@ from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, e
 from ouroboros.structured_output import strip_reasoning_artifacts
 from supervisor.state import get_provider_quota_status
 from ouroboros.outcome import (
+    apply_task_type_outcome_policy,
     classify_outcome_from_facts,
     default_execution_facts,
     maybe_adjudicate_outcome_with_model,
@@ -120,6 +121,10 @@ def _finalize_loop_return(
         execution_facts=facts,
         final_text=text,
         deterministic_outcome=outcome,
+    )
+    outcome = apply_task_type_outcome_policy(
+        task_type=str(llm_trace.get("task_type") or ""),
+        execution_outcome=outcome,
     )
     return text, accumulated_usage, llm_trace, outcome
 

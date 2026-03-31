@@ -261,3 +261,33 @@ def maybe_adjudicate_outcome_with_model(
         )
     except Exception:
         return deterministic_outcome
+
+
+def apply_task_type_outcome_policy(
+    *,
+    task_type: str,
+    execution_outcome: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply task-type-specific lifecycle policy on top of generic outcome classes."""
+    outcome = dict(execution_outcome or {})
+    current = str(outcome.get("outcome_class") or "").strip().lower()
+    normalized_task_type = str(task_type or "").strip().lower()
+
+    if normalized_task_type == "evolution":
+        if current == OUTCOME_REPORT_ONLY:
+            return build_execution_outcome(
+                OUTCOME_FAILED,
+                reason="evolution_requires_concrete_work_not_report_only",
+                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
+                productive=False,
+            )
+
+    if normalized_task_type == "review":
+        if current == OUTCOME_REPORT_ONLY:
+            return build_execution_outcome(
+                OUTCOME_VERIFIED_NO_CHANGE,
+                reason="review_completed_without_required_modification",
+                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
+            )
+
+    return outcome
