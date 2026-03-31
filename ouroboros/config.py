@@ -33,6 +33,7 @@ RESTART_EXIT_CODE = 42
 PANIC_EXIT_CODE = 99
 AGENT_SERVER_PORT = 8765
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 DEFAULT_LOCAL_MODEL_PORT = 8766
 
 
@@ -42,6 +43,11 @@ DEFAULT_LOCAL_MODEL_PORT = 8766
 SETTINGS_DEFAULTS = {
     "OPENROUTER_API_KEY": "",
     "OPENROUTER_BASE_URL": DEFAULT_OPENROUTER_BASE_URL,
+    "MINIMAX_API_KEY": "",
+    "MINIMAX_BASE_URL": DEFAULT_MINIMAX_BASE_URL,
+    "MINIMAX_PLAN_TYPE": "token_plan",
+    "MINIMAX_PLAN_TIER": "",
+    "LLM_PROVIDER": "openrouter",
     "OPENAI_API_KEY": "",
     "ANTHROPIC_API_KEY": "",
     "OUROBOROS_MODEL": "Qwen/Qwen3.5-27B",
@@ -136,6 +142,25 @@ def has_openrouter_config(settings: Optional[dict] = None) -> bool:
     return bool(str(_settings_value(settings, "OPENROUTER_API_KEY", "")).strip())
 
 
+def has_minimax_config(settings: Optional[dict] = None) -> bool:
+    """Return True when MiniMax cloud backend is configured."""
+    return bool(str(_settings_value(settings, "MINIMAX_API_KEY", "")).strip())
+
+
+def get_cloud_provider(settings: Optional[dict] = None) -> str:
+    """Return the selected cloud provider."""
+    raw = str(_settings_value(settings, "LLM_PROVIDER", SETTINGS_DEFAULTS["LLM_PROVIDER"])).strip().lower()
+    return raw if raw in {"openrouter", "minimax"} else str(SETTINGS_DEFAULTS["LLM_PROVIDER"])
+
+
+def has_cloud_provider_config(settings: Optional[dict] = None) -> bool:
+    """Return True when the selected cloud provider is configured."""
+    provider = get_cloud_provider(settings)
+    if provider == "minimax":
+        return has_minimax_config(settings)
+    return has_openrouter_config(settings)
+
+
 def has_local_routing_enabled(settings: Optional[dict] = None) -> bool:
     """Return True when any model lane is configured to use local routing."""
     return any(
@@ -158,7 +183,7 @@ def has_local_model_config(settings: Optional[dict] = None) -> bool:
 
 def has_configured_llm_backend(settings: Optional[dict] = None) -> bool:
     """Return True when any usable LLM backend is configured."""
-    return has_openrouter_config(settings) or has_local_model_config(settings)
+    return has_cloud_provider_config(settings) or has_local_model_config(settings)
 
 
 def use_local_for_lane(lane: str, settings: Optional[dict] = None) -> bool:
@@ -226,6 +251,16 @@ def resolve_openrouter_base_url(base_url: Optional[str] = None) -> str:
     if env_val.strip():
         return env_val.strip().rstrip("/")
     return str(DEFAULT_OPENROUTER_BASE_URL).rstrip("/")
+
+
+def resolve_minimax_base_url(base_url: Optional[str] = None) -> str:
+    """Resolve MiniMax base URL from arg -> env -> defaults."""
+    if base_url is not None and str(base_url).strip():
+        return str(base_url).strip().rstrip("/")
+    env_val = os.environ.get("MINIMAX_BASE_URL", "")
+    if env_val.strip():
+        return env_val.strip().rstrip("/")
+    return str(DEFAULT_MINIMAX_BASE_URL).rstrip("/")
 
 
 def resolve_local_model_base_url(base_url: Optional[str] = None, port: Optional[int] = None) -> str:
@@ -334,7 +369,9 @@ def save_settings(settings: dict) -> None:
 def apply_settings_to_env(settings: dict) -> None:
     """Push settings into environment variables for supervisor modules."""
     env_keys = [
-        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
+        "MINIMAX_API_KEY", "MINIMAX_BASE_URL", "MINIMAX_PLAN_TYPE", "MINIMAX_PLAN_TIER", "LLM_PROVIDER",
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
         "OUROBOROS_MODEL", "OUROBOROS_MODEL_CODE", "OUROBOROS_MODEL_LIGHT",
         "OUROBOROS_MODEL_CONSOLIDATION",
         "OUROBOROS_MODEL_FALLBACK", "CLAUDE_CODE_MODEL", "CLAUDE_CODE_AUTH_MODE",

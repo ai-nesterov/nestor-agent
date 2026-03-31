@@ -3,14 +3,17 @@ import os
 from ouroboros.config import (
     SETTINGS_DEFAULTS,
     apply_settings_to_env,
+    get_cloud_provider,
     resolve_effort,
     get_review_models,
     get_review_enforcement,
     get_review_executor,
     has_openrouter_config,
+    has_minimax_config,
     has_local_model_config,
     has_configured_llm_backend,
     use_local_for_lane,
+    resolve_minimax_base_url,
 )
 
 
@@ -55,6 +58,9 @@ def test_effort_defaults_in_config():
 def test_base_url_and_local_api_defaults_in_config():
     """Provider/base-url defaults are present and backward-compatible."""
     assert SETTINGS_DEFAULTS.get("OPENROUTER_BASE_URL") == "https://openrouter.ai/api/v1"
+    assert SETTINGS_DEFAULTS.get("MINIMAX_BASE_URL") == "https://api.minimax.io/v1"
+    assert SETTINGS_DEFAULTS.get("MINIMAX_API_KEY") == ""
+    assert SETTINGS_DEFAULTS.get("LLM_PROVIDER") == "openrouter"
     assert isinstance(SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL"), str)
     assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_BASE_URL", "").endswith("/v1")
     assert SETTINGS_DEFAULTS.get("LOCAL_MODEL_API_KEY") == ""
@@ -206,26 +212,54 @@ def test_apply_settings_to_env_includes_effort_keys():
 def test_apply_settings_to_env_includes_new_base_url_keys():
     settings = {
         "OPENROUTER_BASE_URL": "https://proxy.example/api/v1",
+        "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+        "MINIMAX_API_KEY": "minimax-key",
+        "LLM_PROVIDER": "minimax",
         "LOCAL_MODEL_BASE_URL": "http://localhost:9999/v1",
         "LOCAL_MODEL_API_KEY": "local-key",
     }
     apply_settings_to_env(settings)
     assert os.environ.get("OPENROUTER_BASE_URL") == "https://proxy.example/api/v1"
+    assert os.environ.get("MINIMAX_BASE_URL") == "https://api.minimax.io/v1"
+    assert os.environ.get("MINIMAX_API_KEY") == "minimax-key"
+    assert os.environ.get("LLM_PROVIDER") == "minimax"
     assert os.environ.get("LOCAL_MODEL_BASE_URL") == "http://localhost:9999/v1"
     assert os.environ.get("LOCAL_MODEL_API_KEY") == "local-key"
-    for k in ("OPENROUTER_BASE_URL", "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY"):
+    for k in ("OPENROUTER_BASE_URL", "MINIMAX_BASE_URL", "MINIMAX_API_KEY", "LLM_PROVIDER", "LOCAL_MODEL_BASE_URL", "LOCAL_MODEL_API_KEY"):
         os.environ.pop(k, None)
 
 
 def test_llm_backend_scenario_a_openrouter_only():
     settings = {
+        "LLM_PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-or-123",
+        "MINIMAX_API_KEY": "",
         "LOCAL_MODEL_BASE_URL": "",
         "LOCAL_MODEL_SOURCE": "",
         "LOCAL_MODEL_PORT": "",
         "USE_LOCAL_MAIN": False,
     }
+    assert get_cloud_provider(settings) == "openrouter"
     assert has_openrouter_config(settings) is True
+    assert has_minimax_config(settings) is False
+    assert has_local_model_config(settings) is False
+    assert has_configured_llm_backend(settings) is True
+    assert use_local_for_lane("MAIN", settings) is False
+
+
+def test_llm_backend_scenario_a_minimax_only():
+    settings = {
+        "LLM_PROVIDER": "minimax",
+        "OPENROUTER_API_KEY": "",
+        "MINIMAX_API_KEY": "minimax-123",
+        "LOCAL_MODEL_BASE_URL": "",
+        "LOCAL_MODEL_SOURCE": "",
+        "LOCAL_MODEL_PORT": "",
+        "USE_LOCAL_MAIN": False,
+    }
+    assert get_cloud_provider(settings) == "minimax"
+    assert has_openrouter_config(settings) is False
+    assert has_minimax_config(settings) is True
     assert has_local_model_config(settings) is False
     assert has_configured_llm_backend(settings) is True
     assert use_local_for_lane("MAIN", settings) is False
@@ -234,12 +268,14 @@ def test_llm_backend_scenario_a_openrouter_only():
 def test_llm_backend_scenario_b_local_base_url_only():
     settings = {
         "OPENROUTER_API_KEY": "",
+        "MINIMAX_API_KEY": "",
         "LOCAL_MODEL_BASE_URL": "http://localhost:1234/v1",
         "LOCAL_MODEL_SOURCE": "",
         "LOCAL_MODEL_PORT": "",
         "USE_LOCAL_MAIN": False,
     }
     assert has_openrouter_config(settings) is False
+    assert has_minimax_config(settings) is False
     assert has_local_model_config(settings) is True
     assert has_configured_llm_backend(settings) is True
     assert use_local_for_lane("MAIN", settings) is True
@@ -248,15 +284,30 @@ def test_llm_backend_scenario_b_local_base_url_only():
 def test_llm_backend_scenario_b_legacy_local_port_path():
     settings = {
         "OPENROUTER_API_KEY": "",
+        "MINIMAX_API_KEY": "",
         "LOCAL_MODEL_BASE_URL": "",
         "LOCAL_MODEL_SOURCE": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
         "LOCAL_MODEL_PORT": 8766,
         "USE_LOCAL_MAIN": True,
     }
     assert has_openrouter_config(settings) is False
+    assert has_minimax_config(settings) is False
     assert has_local_model_config(settings) is True
     assert has_configured_llm_backend(settings) is True
     assert use_local_for_lane("MAIN", settings) is True
+
+
+def test_get_cloud_provider_invalid_falls_back_to_openrouter():
+    settings = {"LLM_PROVIDER": "something-else"}
+    assert get_cloud_provider(settings) == "openrouter"
+
+
+def test_resolve_minimax_base_url_prefers_arg_then_env_then_default(monkeypatch):
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://env.minimax.example/v1")
+    assert resolve_minimax_base_url("https://arg.minimax.example/v1") == "https://arg.minimax.example/v1"
+    assert resolve_minimax_base_url() == "https://env.minimax.example/v1"
+    monkeypatch.delenv("MINIMAX_BASE_URL", raising=False)
+    assert resolve_minimax_base_url() == "https://api.minimax.io/v1"
 
 
 def test_llm_backend_scenario_c_both_configured_defaults_to_cloud_unless_explicit_local():
