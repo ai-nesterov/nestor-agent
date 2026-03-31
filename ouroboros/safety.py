@@ -21,6 +21,7 @@ from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.pricing import emit_llm_usage_event, estimate_cost
 from supervisor.state import update_budget_from_usage
 from ouroboros.config import get_lane_model, use_local_for_lane
+from ouroboros.structured_output import extract_json_object
 
 log = logging.getLogger(__name__)
 
@@ -110,12 +111,8 @@ def _build_check_prompt(
 
 
 def _parse_safety_response(text: str) -> Optional[Dict[str, Any]]:
-    """Parse JSON from LLM response, handling markdown code fences."""
-    clean = text.replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(clean)
-    except json.JSONDecodeError:
-        return None
+    """Parse JSON from LLM response, including reasoning-prefixed payloads."""
+    return extract_json_object(text)
 
 
 def check_safety(

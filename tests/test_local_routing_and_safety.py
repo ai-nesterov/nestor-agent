@@ -177,3 +177,23 @@ def test_format_messages_for_safety_marks_omission():
 
     assert "[..." in output
     assert "chars omitted" in output
+
+
+def test_parse_safety_response_handles_minimax_think_and_fences():
+    from ouroboros.safety import _parse_safety_response
+
+    result = _parse_safety_response(
+        "<think>inspect carefully</think>\n```json\n{\"status\":\"SAFE\",\"reason\":\"normal dev command\"}\n```"
+    )
+
+    assert result == {"status": "SAFE", "reason": "normal dev command"}
+
+
+def test_parse_safety_response_handles_embedded_json_without_fences():
+    from ouroboros.safety import _parse_safety_response
+
+    result = _parse_safety_response(
+        "I checked this.\n<think>hidden</think>\n{\"status\":\"SUSPICIOUS\",\"reason\":\"rm -rf\"}"
+    )
+
+    assert result == {"status": "SUSPICIOUS", "reason": "rm -rf"}
