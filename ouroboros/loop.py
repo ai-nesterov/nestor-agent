@@ -30,6 +30,7 @@ from ouroboros.loop_tool_execution import (
 )
 from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, estimate_cost
 from ouroboros.structured_output import strip_reasoning_artifacts
+from supervisor.state import get_provider_quota_status
 
 # Backward-compat alias for source-inspecting and monkeypatched tests
 _call_llm_with_retry = call_llm_with_retry
@@ -41,7 +42,9 @@ def _build_fallback_candidates(active_model: str, active_use_local: bool) -> Lis
     candidates: List[Tuple[str, bool]] = []
 
     cloud_fallback_model = get_lane_model("FALLBACK", prefer_local=False).strip()
-    if not active_use_local and cloud_fallback_model and cloud_fallback_model != active_model:
+    quota_status = get_provider_quota_status()
+    cloud_quota_blocked = bool(quota_status.get("hard_blocked"))
+    if not active_use_local and not cloud_quota_blocked and cloud_fallback_model and cloud_fallback_model != active_model:
         candidates.append((cloud_fallback_model, False))
 
     if has_local_model_config():
@@ -52,6 +55,21 @@ def _build_fallback_candidates(active_model: str, active_use_local: bool) -> Lis
                 candidates.append(local_candidate)
 
     return candidates
+
+
+def _get_quota_adjusted_effort(
+    active_effort: str,
+    active_use_local: bool,
+) -> Tuple[Dict[str, Any], str]:
+    if active_use_local:
+        return {"provider": "local", "hard_blocked": False, "soft_limited": False, "reason": ""}, active_effort
+
+    quota_status = get_provider_quota_status()
+    adjusted_effort = active_effort
+    normalized = normalize_reasoning_effort(active_effort, default="medium")
+    if quota_status.get("soft_limited") and normalized not in {"none", "low"}:
+        adjusted_effort = "low"
+    return quota_status, adjusted_effort
 
 
 def _handle_text_response(
@@ -374,11 +392,19 @@ def run_llm_loop(
                     int(_compaction_usage.get("cached_tokens") or 0))
                 emit_llm_usage_event(event_queue, task_id, _cm, _compaction_usage, _cc, "compaction")
 
-            msg, cost = call_llm_with_retry(
-                llm, messages, active_model, tool_schemas, active_effort,
-                max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
-                use_local=active_use_local,
-            )
+            quota_status, round_effort = _get_quota_adjusted_effort(active_effort, active_use_local)
+            if quota_status.get("soft_limited") and not active_use_local and round_effort != active_effort:
+                emit_progress(f"⚠️ {quota_status.get('reason')}. Reducing reasoning effort to preserve quota.")
+
+            if quota_status.get("hard_blocked") and not active_use_local:
+                emit_progress(f"⚠️ {quota_status.get('reason')}. Skipping MiniMax primary and trying fallback.")
+                msg, cost = None, 0.0
+            else:
+                msg, cost = call_llm_with_retry(
+                    llm, messages, active_model, tool_schemas, round_effort,
+                    max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
+                    use_local=active_use_local,
+                )
 
             if _pre_checkpoint_effort is not None:
                 active_effort = _pre_checkpoint_effort
@@ -403,8 +429,13 @@ def run_llm_loop(
                     emit_progress(
                         f"⚡ Fallback: {active_model}{primary_tag} → {fallback_model}{fallback_tag} after empty response"
                     )
+                    fallback_quota_status, fallback_effort = _get_quota_adjusted_effort(active_effort, fallback_use_local)
+                    if fallback_quota_status.get("hard_blocked") and not fallback_use_local:
+                        emit_progress(f"⚠️ {fallback_quota_status.get('reason')}. Skipping cloud fallback.")
+                        msg, fallback_cost = None, 0.0
+                        continue
                     msg, fallback_cost = call_llm_with_retry(
-                        llm, messages, fallback_model, tool_schemas, active_effort,
+                        llm, messages, fallback_model, tool_schemas, fallback_effort,
                         max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
                         use_local=fallback_use_local,
                     )

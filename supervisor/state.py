@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from ouroboros.config import get_cloud_provider, resolve_openrouter_base_url
 
 log = logging.getLogger(__name__)
+MINIMAX_QUOTA_SOFT_LIMIT_PCT = 0.10
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +282,67 @@ def budget_remaining(st: Dict[str, Any]) -> float:
     if total <= 0:
         return float('inf')  # No limit set
     return max(0.0, total - spent)
+
+
+def get_provider_quota_status(provider: Optional[str] = None, st: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return provider quota status with hard/soft limit semantics."""
+    def _quota_int(value: Any) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
+    resolved_provider = str(provider or get_cloud_provider()).strip().lower()
+    if st is None:
+        st = load_state()
+    st = ensure_state_defaults(dict(st or {}))
+
+    status: Dict[str, Any] = {
+        "provider": resolved_provider,
+        "hard_blocked": False,
+        "soft_limited": False,
+        "reason": "",
+    }
+    if resolved_provider != "minimax":
+        return status
+
+    five_limit = _quota_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
+    five_remaining_raw = st.get("minimax_requests_5h_remaining")
+    five_remaining = None if five_remaining_raw is None else _quota_int(five_remaining_raw)
+    weekly_limit = _quota_int(os.environ.get("MINIMAX_REQUESTS_WEEKLY_LIMIT", st.get("minimax_requests_weekly_limit") or 0))
+    weekly_remaining_raw = st.get("minimax_requests_weekly_remaining")
+    weekly_remaining = None if weekly_remaining_raw is None else _quota_int(weekly_remaining_raw)
+
+    status.update({
+        "five_hour_limit": five_limit,
+        "five_hour_remaining": five_remaining,
+        "weekly_limit": weekly_limit,
+        "weekly_remaining": weekly_remaining,
+    })
+
+    exhausted_reasons = []
+    if five_limit > 0 and five_remaining is not None and five_remaining <= 0:
+        exhausted_reasons.append("MiniMax 5h quota exhausted")
+    if weekly_limit > 0 and weekly_remaining is not None and weekly_remaining <= 0:
+        exhausted_reasons.append("MiniMax weekly quota exhausted")
+    if exhausted_reasons:
+        status["hard_blocked"] = True
+        status["reason"] = "; ".join(exhausted_reasons)
+        return status
+
+    soft_reasons = []
+    if five_limit > 0 and five_remaining is not None:
+        five_soft_threshold = max(1, int(five_limit * MINIMAX_QUOTA_SOFT_LIMIT_PCT))
+        if five_remaining <= five_soft_threshold:
+            soft_reasons.append(f"MiniMax 5h quota low ({five_remaining} left)")
+    if weekly_limit > 0 and weekly_remaining is not None:
+        weekly_soft_threshold = max(1, int(weekly_limit * MINIMAX_QUOTA_SOFT_LIMIT_PCT))
+        if weekly_remaining <= weekly_soft_threshold:
+            soft_reasons.append(f"MiniMax weekly quota low ({weekly_remaining} left)")
+    if soft_reasons:
+        status["soft_limited"] = True
+        status["reason"] = "; ".join(soft_reasons)
+    return status
 
 
 def check_openrouter_ground_truth() -> Optional[Dict[str, float]]:

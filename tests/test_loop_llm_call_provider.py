@@ -65,3 +65,33 @@ def test_build_fallback_candidates_for_local_primary_skips_cloud_stage(monkeypat
     monkeypatch.setattr("ouroboros.loop.has_local_model_config", lambda: True)
 
     assert _build_fallback_candidates("Qwen/Qwen3.5-27B", active_use_local=True) == []
+
+
+def test_build_fallback_candidates_skips_cloud_when_quota_blocked(monkeypatch):
+    from ouroboros.loop import _build_fallback_candidates
+
+    monkeypatch.setattr("ouroboros.loop.get_lane_model", lambda lane, prefer_local=False: "MiniMax-M2.1")
+    monkeypatch.setattr("ouroboros.loop.get_local_lane_model", lambda lane: "Qwen/Qwen3.5-27B")
+    monkeypatch.setattr("ouroboros.loop.has_local_model_config", lambda: True)
+    monkeypatch.setattr(
+        "ouroboros.loop.get_provider_quota_status",
+        lambda: {"hard_blocked": True, "soft_limited": False, "reason": "MiniMax 5h quota exhausted"},
+    )
+
+    assert _build_fallback_candidates("MiniMax-M2.5", active_use_local=False) == [
+        ("Qwen/Qwen3.5-27B", True),
+    ]
+
+
+def test_get_quota_adjusted_effort_downgrades_on_soft_limit(monkeypatch):
+    from ouroboros.loop import _get_quota_adjusted_effort
+
+    monkeypatch.setattr(
+        "ouroboros.loop.get_provider_quota_status",
+        lambda: {"hard_blocked": False, "soft_limited": True, "reason": "MiniMax quota low"},
+    )
+
+    status, effort = _get_quota_adjusted_effort("high", active_use_local=False)
+
+    assert status["soft_limited"] is True
+    assert effort == "low"
