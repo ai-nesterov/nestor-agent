@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 
 from ouroboros.task_results import STATUS_COMPLETED, write_task_result
 from ouroboros.utils import utc_now_iso, append_jsonl
+from ouroboros.structured_output import strip_reasoning_artifacts
 
 log = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ def _run_task_summary(env, llm, task, usage, llm_trace, drive_logs):
                 reasoning_effort=CONSOLIDATION_REASONING_EFFORT,
                 max_tokens=2048,
             )
-            summary_text = (msg.get("content") or "").strip()
+            summary_text = strip_reasoning_artifacts(msg.get("content") or "")
             if _usage.get("cost"):
                 try:
                     from supervisor.state import update_budget_from_usage

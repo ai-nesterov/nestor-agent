@@ -18,6 +18,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from ouroboros.utils import utc_now_iso, append_jsonl
+from ouroboros.structured_output import strip_reasoning_artifacts
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ def generate_reflection(
             reasoning_effort="low",
             max_tokens=512,
         )
-        reflection_text = (resp_msg.get("content") or "").strip()
+        reflection_text = strip_reasoning_artifacts(resp_msg.get("content") or "")
     except Exception as e:
         log.warning("Reflection LLM call failed: %s", e)
         reflection_text = f"(reflection generation failed: {e})"
@@ -263,7 +264,7 @@ def _update_patterns(drive_root: pathlib.Path, entry: Dict[str, Any]) -> None:
         reasoning_effort="low",
         max_tokens=1024,
     )
-    updated = (resp_msg.get("content") or "").strip()
+    updated = strip_reasoning_artifacts(resp_msg.get("content") or "")
     if not updated or "|" not in updated:
         log.warning("Pattern register LLM returned invalid output, skipping update")
         return

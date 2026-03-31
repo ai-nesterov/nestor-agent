@@ -29,6 +29,7 @@ from ouroboros.loop_tool_execution import (
     _DEFAULT_TOOL_RESULT_LIMIT,
 )
 from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, estimate_cost
+from ouroboros.structured_output import strip_reasoning_artifacts
 
 # Backward-compat alias for source-inspecting and monkeypatched tests
 _call_llm_with_retry = call_llm_with_retry
@@ -59,9 +60,10 @@ def _handle_text_response(
     accumulated_usage: Dict[str, Any],
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """Handle LLM response without tool calls (final response)."""
-    if content and content.strip():
-        llm_trace["reasoning_notes"].append(content.strip())
-    return (content or ""), accumulated_usage, llm_trace
+    cleaned = strip_reasoning_artifacts(content or "")
+    if cleaned:
+        llm_trace["reasoning_notes"].append(cleaned)
+    return cleaned, accumulated_usage, llm_trace
 
 
 def _check_budget_limits(

@@ -35,6 +35,7 @@ from ouroboros.utils import (
 from ouroboros.config import get_lane_model, resolve_effort, use_local_for_lane
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.memory import Memory
+from ouroboros.structured_output import strip_reasoning_artifacts
 from ouroboros.context import (
     build_runtime_section, build_memory_sections,
     build_recent_sections, build_health_invariants, safe_read,
@@ -272,7 +273,7 @@ class BackgroundConsciousness:
                         "category": "consciousness",
                     })
 
-                content = msg.get("content") or ""
+                content = strip_reasoning_artifacts(msg.get("content") or "")
                 tool_calls = msg.get("tool_calls") or []
                 self._emit_live_log(
                     "llm_round_finished",
