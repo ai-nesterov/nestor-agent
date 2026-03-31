@@ -16,9 +16,14 @@ class _FakeOpenAI:
         type(self).created.append(self)
 
 
+class _FakeAsyncOpenAI(_FakeOpenAI):
+    pass
+
+
 class TestLlmClientRefresh(unittest.TestCase):
     def setUp(self):
         _FakeOpenAI.created.clear()
+        _FakeAsyncOpenAI.created.clear()
 
     def test_runtime_client_refreshes_when_env_key_changes(self):
         from ouroboros.llm import LLMClient
@@ -76,6 +81,61 @@ class TestLlmClientRefresh(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertEqual(_FakeOpenAI.created[0].kwargs["base_url"], "https://or-a.example/api/v1")
         self.assertEqual(_FakeOpenAI.created[1].kwargs["base_url"], "https://or-b.example/api/v1")
+
+    def test_runtime_client_uses_minimax_provider_selection(self):
+        from ouroboros.llm import LLMClient
+
+        fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI, AsyncOpenAI=_FakeAsyncOpenAI)
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            with patch.dict(
+                os.environ,
+                {
+                    "LLM_PROVIDER": "minimax",
+                    "MINIMAX_API_KEY": "minimax-key",
+                    "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+                },
+                clear=False,
+            ):
+                client = LLMClient()
+                instance = client._get_client()
+
+        self.assertIsNotNone(instance)
+        self.assertEqual(len(_FakeOpenAI.created), 1)
+        self.assertEqual(_FakeOpenAI.created[0].kwargs["api_key"], "minimax-key")
+        self.assertEqual(_FakeOpenAI.created[0].kwargs["base_url"], "https://api.minimax.io/v1")
+        self.assertNotIn("default_headers", _FakeOpenAI.created[0].kwargs)
+
+    def test_runtime_client_refreshes_when_provider_changes(self):
+        from ouroboros.llm import LLMClient
+
+        fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI, AsyncOpenAI=_FakeAsyncOpenAI)
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            with patch.dict(
+                os.environ,
+                {
+                    "LLM_PROVIDER": "openrouter",
+                    "OPENROUTER_API_KEY": "sk-or-key",
+                    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                },
+                clear=False,
+            ):
+                client = LLMClient()
+                first = client._get_client()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "LLM_PROVIDER": "minimax",
+                    "MINIMAX_API_KEY": "minimax-key",
+                    "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+                },
+                clear=False,
+            ):
+                second = client._get_client()
+
+        self.assertIsNot(first, second)
+        self.assertEqual(_FakeOpenAI.created[0].kwargs["api_key"], "sk-or-key")
+        self.assertEqual(_FakeOpenAI.created[1].kwargs["api_key"], "minimax-key")
 
     def test_local_chat_uses_port_fallback_without_auth_header(self):
         from ouroboros.llm import LLMClient

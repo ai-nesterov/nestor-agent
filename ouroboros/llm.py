@@ -16,9 +16,12 @@ import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ouroboros.config import (
+    get_cloud_provider,
     has_local_model_config,
+    has_minimax_config,
     resolve_local_model_api_key,
     resolve_local_model_base_url,
+    resolve_minimax_base_url,
     resolve_openrouter_base_url,
 )
 
@@ -235,66 +238,102 @@ class LLMClient:
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         self._base_url_override = base_url
         self._base_url = resolve_openrouter_base_url(base_url)
+        self._provider_override: Optional[str] = None
         self._client = None
         self._client_api_key: Optional[str] = None
         self._client_base_url: Optional[str] = None
+        self._client_provider: Optional[str] = None
         self._async_client = None
         self._async_client_api_key: Optional[str] = None
         self._async_client_base_url: Optional[str] = None
+        self._async_client_provider: Optional[str] = None
 
     def _resolve_openrouter_base_url(self) -> str:
         return resolve_openrouter_base_url(self._base_url_override)
 
+    def _resolve_minimax_base_url(self) -> str:
+        return resolve_minimax_base_url(self._base_url_override)
+
+    def _get_cloud_provider(self) -> str:
+        if self._provider_override:
+            return self._provider_override
+        return get_cloud_provider()
+
+    def _get_cloud_api_key(self, provider: Optional[str] = None) -> str:
+        if self._api_key_override is not None:
+            return self._api_key_override
+        resolved = provider or self._get_cloud_provider()
+        if resolved == "minimax":
+            return os.environ.get("MINIMAX_API_KEY", "")
+        return os.environ.get("OPENROUTER_API_KEY", "")
+
+    def _resolve_cloud_base_url(self, provider: Optional[str] = None) -> str:
+        resolved = provider or self._get_cloud_provider()
+        if resolved == "minimax":
+            return self._resolve_minimax_base_url()
+        return self._resolve_openrouter_base_url()
+
+    @staticmethod
+    def _cloud_client_headers(provider: str) -> Optional[Dict[str, str]]:
+        if provider == "openrouter":
+            return {
+                "HTTP-Referer": "https://ouroboros.local/",
+                "X-Title": "Ouroboros",
+            }
+        return None
+
     def _get_client(self):
-        current_api_key = self._api_key_override
-        if current_api_key is None:
-            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
-        current_base_url = self._resolve_openrouter_base_url()
+        provider = self._get_cloud_provider()
+        current_api_key = self._get_cloud_api_key(provider)
+        current_base_url = self._resolve_cloud_base_url(provider)
 
         if (
             self._client is None
             or self._client_api_key != current_api_key
             or self._client_base_url != current_base_url
+            or self._client_provider != provider
         ):
             from openai import OpenAI
-            self._client = OpenAI(
-                base_url=current_base_url,
-                api_key=current_api_key,
-                max_retries=0,
-                default_headers={
-                    "HTTP-Referer": "https://ouroboros.local/",
-                    "X-Title": "Ouroboros",
-                },
-            )
+            kwargs: Dict[str, Any] = {
+                "base_url": current_base_url,
+                "api_key": current_api_key,
+                "max_retries": 0,
+            }
+            headers = self._cloud_client_headers(provider)
+            if headers:
+                kwargs["default_headers"] = headers
+            self._client = OpenAI(**kwargs)
             self._client_api_key = current_api_key
             self._client_base_url = current_base_url
+            self._client_provider = provider
             self._api_key = current_api_key
             self._base_url = current_base_url
         return self._client
 
     def _get_async_client(self):
-        current_api_key = self._api_key_override
-        if current_api_key is None:
-            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
-        current_base_url = self._resolve_openrouter_base_url()
+        provider = self._get_cloud_provider()
+        current_api_key = self._get_cloud_api_key(provider)
+        current_base_url = self._resolve_cloud_base_url(provider)
 
         if (
             self._async_client is None
             or self._async_client_api_key != current_api_key
             or self._async_client_base_url != current_base_url
+            or self._async_client_provider != provider
         ):
             from openai import AsyncOpenAI
-            self._async_client = AsyncOpenAI(
-                base_url=current_base_url,
-                api_key=current_api_key,
-                max_retries=0,
-                default_headers={
-                    "HTTP-Referer": "https://ouroboros.local/",
-                    "X-Title": "Ouroboros",
-                },
-            )
+            kwargs: Dict[str, Any] = {
+                "base_url": current_base_url,
+                "api_key": current_api_key,
+                "max_retries": 0,
+            }
+            headers = self._cloud_client_headers(provider)
+            if headers:
+                kwargs["default_headers"] = headers
+            self._async_client = AsyncOpenAI(**kwargs)
             self._async_client_api_key = current_api_key
             self._async_client_base_url = current_base_url
+            self._async_client_provider = provider
         return self._async_client
 
     @staticmethod
@@ -350,9 +389,8 @@ class LLMClient:
         When use_local=True, routes to the local llama-cpp-python server
         and strips OpenRouter-specific parameters (reasoning, provider, cache_control).
         """
-        current_api_key = self._api_key_override
-        if current_api_key is None:
-            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        provider = self._get_cloud_provider()
+        current_api_key = self._get_cloud_api_key(provider)
         should_fallback_to_local = (
             not use_local
             and not str(current_api_key or "").strip()
@@ -374,7 +412,8 @@ class LLMClient:
                 tool_choice=tool_choice,
             )
 
-        return self._chat_openrouter(
+        return self._chat_cloud(
+            provider=provider,
             messages=messages,
             model=model,
             tools=tools,
@@ -397,12 +436,13 @@ class LLMClient:
         """Async OpenRouter chat used by review/concurrent callers."""
         if tools:
             raise ValueError("chat_async does not support tool calls")
+        provider = self._get_cloud_provider()
         client = self._get_async_client()
-        kwargs = self._build_openrouter_kwargs(
-            messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
+        kwargs = self._build_cloud_kwargs(
+            provider, messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
         )
         resp = await client.chat.completions.create(**kwargs)
-        return self._normalize_openrouter_response(resp.model_dump())
+        return self._normalize_cloud_response(provider, resp.model_dump())
 
     def _prepare_messages_for_local_context(
         self,
@@ -497,11 +537,14 @@ class LLMClient:
         # Flatten multipart content blocks to plain strings (local server doesn't support arrays)
         local_max = min(max_tokens, 2048)
         ctx_len = 0
+        base_url = resolve_local_model_base_url()
+        explicit_base_url = bool(str(os.environ.get("LOCAL_MODEL_BASE_URL", "")).strip())
         try:
-            from ouroboros.local_model import get_manager
-            ctx_len = get_manager().get_context_length()
-            if ctx_len > 0:
-                local_max = min(max_tokens, max(256, ctx_len // 4))
+            if not explicit_base_url:
+                from ouroboros.local_model import get_manager
+                ctx_len = get_manager().get_context_length()
+                if ctx_len > 0:
+                    local_max = min(max_tokens, max(256, ctx_len // 4))
         except Exception:
             pass
 
@@ -537,7 +580,6 @@ class LLMClient:
         local_api_key = resolve_local_model_api_key().strip()
         if local_api_key:
             headers["Authorization"] = f"Bearer {local_api_key}"
-        base_url = resolve_local_model_base_url()
         endpoint = f"{base_url}/chat/completions"
 
         last_exc: Optional[Exception] = None
@@ -546,7 +588,7 @@ class LLMClient:
         tools_disabled_for_compat = False
         for attempt in range(3):
             try:
-                resp = requests.post(endpoint, json=kwargs, headers=headers, timeout=120)
+                resp = requests.post(endpoint, json=copy.deepcopy(kwargs), headers=headers, timeout=120)
                 status_code = int(getattr(resp, "status_code", 0) or 0)
                 if 400 <= status_code < 500 and self._is_local_model_not_found(resp):
                     fallback_model = self._choose_local_fallback_model(
@@ -926,6 +968,50 @@ class LLMClient:
             kwargs["tool_choice"] = tool_choice
         return kwargs
 
+    def _build_minimax_kwargs(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        reasoning_effort: str,
+        max_tokens: int,
+        tool_choice: str,
+        temperature: Optional[float],
+    ) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": self._strip_cache_control(messages),
+            "max_tokens": max_tokens,
+        }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if tools:
+            kwargs["tools"] = [
+                {k: v for k, v in tool.items() if k != "cache_control"}
+                for tool in tools
+            ]
+            kwargs["tool_choice"] = tool_choice
+        return kwargs
+
+    def _build_cloud_kwargs(
+        self,
+        provider: str,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        reasoning_effort: str,
+        max_tokens: int,
+        tool_choice: str,
+        temperature: Optional[float],
+    ) -> Dict[str, Any]:
+        if provider == "minimax":
+            return self._build_minimax_kwargs(
+                messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
+            )
+        return self._build_openrouter_kwargs(
+            messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
+        )
+
     def _normalize_openrouter_response(
         self,
         resp_dict: Dict[str, Any],
@@ -957,8 +1043,21 @@ class LLMClient:
 
         return msg, usage
 
-    def _chat_openrouter(
+    def _normalize_cloud_response(
         self,
+        provider: str,
+        resp_dict: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        if provider == "minimax":
+            usage = resp_dict.get("usage") or {}
+            choices = resp_dict.get("choices") or [{}]
+            msg = (choices[0] if choices else {}).get("message") or {}
+            return msg, usage
+        return self._normalize_openrouter_response(resp_dict)
+
+    def _chat_cloud(
+        self,
+        provider: str,
         messages: List[Dict[str, Any]],
         model: str,
         tools: Optional[List[Dict[str, Any]]],
@@ -967,26 +1066,25 @@ class LLMClient:
         tool_choice: str,
         temperature: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Send a chat request to OpenRouter."""
-        current_api_key = self._api_key_override
-        if current_api_key is None:
-            current_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        """Send a chat request to the selected cloud provider."""
+        current_api_key = self._get_cloud_api_key(provider)
         if not str(current_api_key or "").strip():
             if has_local_model_config():
                 raise RuntimeError(
-                    "Cloud LLM backend is not configured (missing OPENROUTER_API_KEY). "
+                    "Cloud LLM backend is not configured. "
                     "Local model is configured; route this call through local backend."
                 )
+            missing_key = "MINIMAX_API_KEY" if provider == "minimax" else "OPENROUTER_API_KEY"
             raise RuntimeError(
-                "No LLM provider configured. Configure OpenRouter API key "
+                f"No LLM provider configured. Configure {missing_key} "
                 "or local model backend."
             )
         client = self._get_client()
-        kwargs = self._build_openrouter_kwargs(
-            messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
+        kwargs = self._build_cloud_kwargs(
+            provider, messages, model, tools, reasoning_effort, max_tokens, tool_choice, temperature
         )
         resp = client.chat.completions.create(**kwargs)
-        return self._normalize_openrouter_response(resp.model_dump())
+        return self._normalize_cloud_response(provider, resp.model_dump())
 
     def vision_query(
         self,

@@ -111,6 +111,38 @@ def test_build_openrouter_kwargs_for_non_anthropic_has_no_provider_block():
     assert "provider" not in kwargs["extra_body"]
 
 
+def test_build_minimax_kwargs_strips_openrouter_specific_fields():
+    from ouroboros.llm import LLMClient
+
+    client = LLMClient()
+    kwargs = client._build_minimax_kwargs(
+        messages=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}],
+            }
+        ],
+        model="MiniMax-M2.7",
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "echo", "parameters": {"type": "object"}},
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        reasoning_effort="medium",
+        max_tokens=1000,
+        tool_choice="auto",
+        temperature=None,
+    )
+
+    assert kwargs["model"] == "MiniMax-M2.7"
+    assert "extra_body" not in kwargs
+    assert kwargs["messages"][0]["content"][0]["text"] == "hi"
+    assert "cache_control" not in kwargs["messages"][0]["content"][0]
+    assert "cache_control" not in kwargs["tools"][0]
+
+
 def test_format_messages_for_safety_marks_omission():
     from ouroboros.safety import _format_messages_for_safety
 
