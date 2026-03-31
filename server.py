@@ -905,6 +905,8 @@ from ouroboros.config import read_version as _read_version
 
 async def api_cost_breakdown(request: Request) -> JSONResponse:
     """Aggregate llm_usage events from events.jsonl into cost breakdowns."""
+    from supervisor.state import load_state
+
     events_path = DATA_DIR / "logs" / "events.jsonl"
     by_model: Dict[str, Dict[str, Any]] = {}
     by_api_key: Dict[str, Dict[str, Any]] = {}
