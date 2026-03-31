@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.7.3](https://img.shields.io/badge/version-4.7.3-green.svg)](VERSION)
+[![Version 4.7.4](https://img.shields.io/badge/version-4.7.4-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -247,6 +247,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.7.4 | 2026-03-31 | Fix evolution prompt to prevent "report_only" failure pattern — evolution tasks now have strict rules: first tool call MUST be repo_read, second MUST be repo_write/str_replace_editor/commit. If wait_for_task() is called more than once, it's already failure. | ouroboros |
 | 4.7.1 | 2026-03-30 | Review executor feature: added configurable review_executor parameter to repo_commit (cloud/codex/claude_code/both). Implemented backend-agnostic review orchestrator with CLI isolation in temp worktrees. External workers can now be used for code review instead of cloud models ($0.00 vs $0.10). Full implementation delegated to codex executor (architectural analysis + code). Backward compatibility preserved (cloud review default).
 | 4.7.0 | 2026-03-30 | Telegram bot security hardening via external worker code review. Applied combined patch from codex+claude_code: user authorization for admin commands, HTTP client pooling, from_user=None handling, secret redaction in logs, retry logic for 5xx errors. Regression tests added. External worker workflow validated: code review → fix proposals → final patch merge ($0.40 total).
 | 4.6.9 | 2026-03-30 | External worker integration: first successful patch application from codex executor. Added tests/test_codex_worker_final.py (external executor generated). Full cycle: schedule_task → wait_for_task → validate_executor_result → apply_task_patch → repo_commit. External workers now fully operational.

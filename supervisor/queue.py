@@ -483,36 +483,47 @@ def enforce_task_timeouts() -> None:
 def build_evolution_task_text(cycle: int) -> str:
     """Build evolution task text for autonomous cycles.
 
-    Automatic evolution must choose and execute ONE concrete improvement within
-    the first 2-3 tool calls. Not "think about what to do", but DO it.
+    FAILURE PATTERN: The system gets stuck in "report_only" mode - repeatedly
+    calling wait_for_task(), checking status, running diagnostics - but never
+    producing concrete file changes. This is a CRITICAL BUG in the task itself.
     
-    FAILURE PATTERN WARNING - THIS IS A BUG TO FIX:
-    The system frequently enters "report_only" mode: analyzing, checking status,
-    waiting, reflecting — but never producing concrete code/file changes. This is
-    a failure, not a valid outcome. If you find yourself repeatedly calling
-    wait_for_task(), checking status, or writing progress notes without making
-    changes to files — YOU ARE FAILING. Stop immediately and produce real work.
+    If you call wait_for_task() more than ONCE - you are already failing.
+    If you call run_shell() for diagnostics (logs, ps, git status) without
+    immediately following with file changes - you are failing.
+    If you send progress/status messages without having modified files - you are failing.
     
-    Concrete work means: repo_write, str_replace_editor, run_shell with git/file changes.
-    NOT: wait_for_task, run_shell for diagnostics only, progress updates.
+    CORRECT BEHAVIOR:
+    - First tool call: read ONE file that needs improvement
+    - Second tool call: make ONE concrete change (repo_write, str_replace_editor)
+    - Third tool call: commit (repo_commit)
+    - If done, return success. If stuck, fail early with SPECIFIC question.
     
-    If you truly cannot find anything to improve, return NEEDS_OWNER_INPUT with
-    a specific, actionable question. "I don't know what to do" is not valid.
+    DO NOT: plan, analyze, think about, check status, wait, reflect.
+    DO: read file, change file, commit.
     """
     return (
         f"EVOLUTION #{cycle}\n\n"
-        "YOUR JOB: Execute ONE concrete improvement NOW. Not plan. Not analyze. DO.\n\n"
-        "Steps (do in order, stop early if step 3 produces work):\n"
-        "1. Read ONE file that needs improvement (check VERSION, scratchpad, knowledge for ideas)\n"
-        "2. Make ONE concrete change to that file (repo_write, str_replace_editor, run_shell git commands)\n"
-        "3. Commit the change and verify it succeeded\n\n"
-        "CRITICAL FAILURE PATTERN:\n"
-        "If you call wait_for_task() more than twice, or send progress/status messages\n"
-        "without modifying files — you are in FAILURE MODE. Stop and do real work.\n\n"
-        "A completed evolution cycle requires: modified files + git commit.\n"
-        "A status report alone is NOT a completed cycle — it is a failure.\n\n"
-        "If you need owner input, stop with NEEDS_OWNER_INPUT and one specific question.\n"
-        "Do not ask owner to choose a task, then continue — that is forbidden."
+        "INSTRUCTIONS:\n"
+        "1. Read ONE file that needs improvement (VERSION, scratchpad, knowledge)\n"
+        "2. Make ONE concrete change to that file\n"
+        "3. Commit the change\n\n"
+        "RULES:\n"
+        "- First tool call MUST be repo_read or str_replace_editor\n"
+        "- Second tool call MUST be repo_write, str_replace_editor, or repo_commit\n"
+        "- If you call wait_for_task() - you are already failing\n"
+        "- If you call run_shell() for diagnostics only - you are already failing\n"
+        "- Progress/status messages without file changes = FAILURE\n\n"
+        "TIMING:\n"
+        "- You have 3 minutes max. After 3 minutes without a commit, FAIL.\n"
+        "- If you can't find anything to improve in 3 minutes, return NEEDS_OWNER_INPUT\n"
+        "  with ONE specific question. \"I don't know what to do\" = FAILURE.\n\n"
+        "SUCCESS CRITERIA:\n"
+        "- Modified files exist (repo_write/str_replace_editor)\n"
+        "- Git commit created\n"
+        "- Nothing else counts as success.\n\n"
+        "FAILURE OUTCOMES (use when stuck):\n"
+        "- FAILED: something broke, can't complete\n"
+        "- NEEDS_OWNER_INPUT: specific question only (not \"what should I do\")\n"
     )
 
 
