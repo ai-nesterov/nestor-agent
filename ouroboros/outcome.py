@@ -176,7 +176,6 @@ def derive_outcome_constraints_from_facts(
 ) -> Dict[str, Any]:
     facts = execution_facts if isinstance(execution_facts, dict) else default_execution_facts()
     text = str(final_text or "").strip()
-    lowered = text.lower()
     normalized_task_type = str(task_type or "").strip().lower()
     impact = mutation_impact_from_facts(facts)
 
@@ -188,20 +187,14 @@ def derive_outcome_constraints_from_facts(
             "semantic_adjudication": False,
         }
 
-    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
-        return {
-            "forced_outcome": OUTCOME_BLOCKED_EXTERNAL,
-            "reason": "provider_or_quota_block_message",
-            "allowed_outcomes": {OUTCOME_BLOCKED_EXTERNAL},
-            "semantic_adjudication": False,
-        }
-
     if int(facts.get("owner_message_requests") or 0) > 0:
         return {
             "forced_outcome": OUTCOME_NEEDS_OWNER_INPUT,
             "reason": "agent_requested_owner_direction_marker",
             "allowed_outcomes": {OUTCOME_NEEDS_OWNER_INPUT},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_NEEDS_OWNER_INPUT,
+            "default_reason": "agent_requested_owner_direction_marker",
         }
 
     if int(facts.get("repo_commit_calls") or 0) > 0:
@@ -210,6 +203,8 @@ def derive_outcome_constraints_from_facts(
             "reason": "repo_commit_executed",
             "allowed_outcomes": {OUTCOME_COMMITTED},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_COMMITTED,
+            "default_reason": "repo_commit_executed",
         }
 
     if impact == "high":
@@ -218,6 +213,8 @@ def derive_outcome_constraints_from_facts(
             "reason": "high_impact_mutation_executed",
             "allowed_outcomes": {OUTCOME_EXECUTED_WORK},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_EXECUTED_WORK,
+            "default_reason": "high_impact_mutation_executed",
         }
 
     if int(facts.get("scheduled_task_calls") or 0) > 0 and impact == "none":
@@ -226,6 +223,8 @@ def derive_outcome_constraints_from_facts(
             "reason": "followup_task_scheduled",
             "allowed_outcomes": {OUTCOME_SCHEDULED_FOLLOWUP},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_SCHEDULED_FOLLOWUP,
+            "default_reason": "followup_task_scheduled",
         }
 
     if int(facts.get("tool_errors_total") or 0) > 0 and int(facts.get("tool_calls_total") or 0) == 0 and not text:
@@ -234,6 +233,8 @@ def derive_outcome_constraints_from_facts(
             "reason": "tool_errors_without_progress",
             "allowed_outcomes": {OUTCOME_FAILED},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_FAILED,
+            "default_reason": "tool_errors_without_progress",
         }
 
     if not text:
@@ -242,9 +243,13 @@ def derive_outcome_constraints_from_facts(
             "reason": "empty_final_text",
             "allowed_outcomes": {OUTCOME_FAILED},
             "semantic_adjudication": False,
+            "default_outcome": OUTCOME_FAILED,
+            "default_reason": "empty_final_text",
         }
 
     if normalized_task_type == "evolution" and (_requests_owner_direction(text) or impact in {"low", "medium"}):
+        default_outcome = OUTCOME_NEEDS_OWNER_INPUT if _requests_owner_direction(text) else OUTCOME_FAILED
+        default_reason = "agent_requested_owner_direction" if _requests_owner_direction(text) else "evolution_semantic_adjudication_required"
         return {
             "forced_outcome": "",
             "reason": "evolution_semantic_adjudication_required",
@@ -252,27 +257,31 @@ def derive_outcome_constraints_from_facts(
                 OUTCOME_EXECUTED_WORK,
                 OUTCOME_SCHEDULED_FOLLOWUP,
                 OUTCOME_NEEDS_OWNER_INPUT,
-                OUTCOME_BLOCKED_EXTERNAL,
                 OUTCOME_REPORT_ONLY,
                 OUTCOME_FAILED,
             },
             "semantic_adjudication": True,
+            "default_outcome": default_outcome,
+            "default_reason": default_reason,
         }
 
     if int(facts.get("tool_calls_total") or 0) == 0:
         allowed = {
             OUTCOME_NEEDS_OWNER_INPUT,
-            OUTCOME_BLOCKED_EXTERNAL,
             OUTCOME_REPORT_ONLY,
             OUTCOME_FAILED,
         }
         if normalized_task_type != "evolution":
             allowed.add(OUTCOME_VERIFIED_NO_CHANGE)
+        default_outcome = OUTCOME_VERIFIED_NO_CHANGE if normalized_task_type == "review" else OUTCOME_REPORT_ONLY
+        default_reason = "text_only_completion_requires_adjudication"
         return {
             "forced_outcome": "",
             "reason": "text_only_completion_requires_adjudication",
             "allowed_outcomes": allowed,
             "semantic_adjudication": True,
+            "default_outcome": default_outcome,
+            "default_reason": default_reason,
         }
 
     if normalized_task_type == "review":
@@ -283,17 +292,17 @@ def derive_outcome_constraints_from_facts(
                 OUTCOME_VERIFIED_NO_CHANGE,
                 OUTCOME_REPORT_ONLY,
                 OUTCOME_NEEDS_OWNER_INPUT,
-                OUTCOME_BLOCKED_EXTERNAL,
                 OUTCOME_FAILED,
             },
             "semantic_adjudication": True,
+            "default_outcome": OUTCOME_VERIFIED_NO_CHANGE,
+            "default_reason": "review_semantic_adjudication_required",
         }
 
     if impact in {"low", "medium"}:
         allowed = {
             OUTCOME_EXECUTED_WORK,
             OUTCOME_NEEDS_OWNER_INPUT,
-            OUTCOME_BLOCKED_EXTERNAL,
             OUTCOME_REPORT_ONLY,
             OUTCOME_FAILED,
         }
@@ -304,6 +313,8 @@ def derive_outcome_constraints_from_facts(
             "reason": f"{impact}_impact_mutation_requires_adjudication",
             "allowed_outcomes": allowed,
             "semantic_adjudication": True,
+            "default_outcome": OUTCOME_REPORT_ONLY,
+            "default_reason": f"{impact}_impact_mutation_requires_adjudication",
         }
 
     return {
@@ -311,6 +322,8 @@ def derive_outcome_constraints_from_facts(
         "reason": "non_mutating_completion_requires_adjudication",
         "allowed_outcomes": {OUTCOME_REPORT_ONLY},
         "semantic_adjudication": False,
+        "default_outcome": OUTCOME_REPORT_ONLY,
+        "default_reason": "non_mutating_completion_requires_adjudication",
     }
 
 
@@ -334,10 +347,12 @@ def classify_outcome_from_facts(
             reason=reason,
             productive=forced_outcome in PRODUCTIVE_OUTCOME_CLASSES,
         )
+    default_outcome = str(constraints.get("default_outcome") or OUTCOME_REPORT_ONLY).strip().lower()
+    default_reason = str(constraints.get("default_reason") or reason or "semantic_adjudication_required").strip()
     return build_execution_outcome(
-        OUTCOME_REPORT_ONLY,
-        reason=reason or "semantic_adjudication_required",
-        productive=False,
+        default_outcome,
+        reason=default_reason,
+        productive=default_outcome in PRODUCTIVE_OUTCOME_CLASSES,
     )
 
 
@@ -362,12 +377,17 @@ def resolve_outcome_conflict(
         )
     if candidate_class and (not allowed_outcomes or candidate_class in allowed_outcomes):
         return candidate_outcome
-    fallback_reason = str((constraints or {}).get("reason") or "semantic_adjudication_required")
+    fallback_outcome = str((constraints or {}).get("default_outcome") or OUTCOME_REPORT_ONLY).strip().lower()
+    fallback_reason = str(
+        (constraints or {}).get("default_reason")
+        or (constraints or {}).get("reason")
+        or "semantic_adjudication_required"
+    )
     return build_execution_outcome(
-        OUTCOME_REPORT_ONLY,
+        fallback_outcome,
         reason=fallback_reason,
         source=OUTCOME_SOURCE_RULE,
-        productive=False,
+        productive=fallback_outcome in PRODUCTIVE_OUTCOME_CLASSES,
     )
 
 

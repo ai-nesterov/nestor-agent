@@ -25,8 +25,12 @@ from ouroboros.task_results import (
     load_task_result,
     write_task_result,
 )
-from ouroboros.outcome import ALL_OUTCOME_CLASSES, OUTCOME_SOURCE_FALLBACK_SUPERVISOR
-from ouroboros.outcome import apply_task_type_outcome_policy
+from ouroboros.outcome import (
+    ALL_OUTCOME_CLASSES,
+    OUTCOME_SOURCE_FALLBACK_SUPERVISOR,
+    apply_task_type_outcome_policy,
+    classify_outcome_from_facts,
+)
 
 # Lazy imports to avoid circular dependencies — everything comes through ctx
 
@@ -404,8 +408,13 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         st = ctx.load_state()
         canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
         if canonical_outcome:
-            outcome, blocked_reason = canonical_outcome, canonical_reason
-            outcome_source = canonical_source or "rule"
+            outcome, blocked_reason, outcome_source = _revalidate_canonical_outcome(
+                task_type,
+                result_payload,
+                canonical_outcome,
+                canonical_reason,
+                canonical_source or "rule",
+            )
         else:
             outcome, blocked_reason = _classify_evolution_outcome(result_payload, evt)
             outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
@@ -478,8 +487,13 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     elif task_id:
         canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
         if canonical_outcome:
-            outcome, blocked_reason = canonical_outcome, canonical_reason
-            outcome_source = canonical_source or "rule"
+            outcome, blocked_reason, outcome_source = _revalidate_canonical_outcome(
+                task_type,
+                result_payload,
+                canonical_outcome,
+                canonical_reason,
+                canonical_source or "rule",
+            )
         else:
             outcome, blocked_reason = _classify_task_outcome(result_payload, evt)
             outcome_source = OUTCOME_SOURCE_FALLBACK_SUPERVISOR
@@ -609,9 +623,6 @@ def _classify_evolution_outcome(
     if rounds == 0:
         return "failed", "task_never_started"
 
-    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
-        return "blocked_external", "provider_or_quota_block"
-
     if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS):
         return "needs_owner_input", "agent_requested_owner_direction"
 
@@ -654,6 +665,49 @@ def _extract_canonical_outcome(
     return outcome, reason, source
 
 
+def _revalidate_canonical_outcome(
+    task_type: str,
+    result_payload: Optional[Dict[str, Any]],
+    outcome: str,
+    reason: str,
+    source: str,
+) -> tuple[str, str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    facts = (payload or {}).get("execution_facts") or {}
+    if not isinstance(facts, dict) or not facts:
+        return str(outcome or "").strip().lower(), reason, source
+    normalized_outcome = str(outcome or "").strip().lower()
+    normalized_source = str(source or "").strip().lower()
+    normalized_reason = str(reason or "").strip().lower()
+    if normalized_source != "rule":
+        return normalized_outcome, reason, source
+    if normalized_outcome not in {"blocked_external", "executed_work", "report_only"}:
+        return normalized_outcome, reason, source
+
+    reclassified = classify_outcome_from_facts(
+        task_type=str(task_type or "").strip().lower(),
+        execution_facts=facts,
+        final_text=str((payload or {}).get("result") or ""),
+    )
+    refreshed_outcome = str(reclassified.get("outcome_class") or "").strip().lower()
+    refreshed_reason = str(reclassified.get("outcome_reason") or "").strip()
+    refreshed_source = str(reclassified.get("outcome_source") or "rule").strip().lower()
+
+    if normalized_outcome == "blocked_external" and normalized_reason in {
+        "provider_or_quota_block_message",
+        "provider_or_quota_block",
+    }:
+        return refreshed_outcome or normalized_outcome, refreshed_reason or reason, refreshed_source
+    if normalized_outcome == "executed_work" and normalized_reason == "mutating_tool_executed":
+        return refreshed_outcome or normalized_outcome, refreshed_reason or reason, refreshed_source
+    if normalized_outcome == "report_only" and normalized_reason in {
+        "text_only_completion_without_tool_execution",
+        "text_only_completion_requires_adjudication",
+    }:
+        return refreshed_outcome or normalized_outcome, refreshed_reason or reason, refreshed_source
+    return normalized_outcome, reason, source
+
+
 def _classify_task_outcome(
     result_payload: Optional[Dict[str, Any]],
     evt: Dict[str, Any],
@@ -664,9 +718,6 @@ def _classify_task_outcome(
     tool_calls, tool_errors = _trace_counts(trace_summary)
     lowered = result_text.lower()
     rounds = int(evt.get("total_rounds") or 0)
-
-    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
-        return "blocked_external", "provider_or_quota_block"
 
     if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS):
         return "needs_owner_input", "agent_requested_owner_direction"
