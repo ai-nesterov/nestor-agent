@@ -71,6 +71,17 @@ _BLOCKED_PATTERNS = (
     "hard blocked",
 )
 
+_HIGH_IMPACT_MUTATION_TOOLS = frozenset({
+    "str_replace_editor",
+    "apply_task_patch",
+    "repo_commit",
+    "data_write",
+})
+_LOW_IMPACT_MUTATION_TOOLS = frozenset({
+    "knowledge_write",
+    "update_scratchpad",
+})
+
 
 def default_execution_facts() -> Dict[str, Any]:
     """Stable structure for runtime execution facts."""
@@ -107,18 +118,25 @@ def build_execution_outcome(
     reason: str = "",
     source: str = OUTCOME_SOURCE_RULE,
     productive: bool | None = None,
+    confidence: float | None = None,
 ) -> Dict[str, Any]:
     normalized = str(outcome_class or OUTCOME_FAILED).strip().lower()
     if normalized not in ALL_OUTCOME_CLASSES:
         normalized = OUTCOME_FAILED
     if productive is None:
         productive = normalized in PRODUCTIVE_OUTCOME_CLASSES
-    return {
+    payload = {
         "outcome_class": normalized,
         "outcome_reason": str(reason or "").strip(),
         "outcome_source": str(source or OUTCOME_SOURCE_RULE).strip().lower(),
         "productive": bool(productive),
     }
+    if confidence is not None:
+        try:
+            payload["confidence"] = max(0.0, min(1.0, float(confidence)))
+        except Exception:
+            pass
+    return payload
 
 
 def _requests_owner_direction(text: str) -> bool:
@@ -128,6 +146,174 @@ def _requests_owner_direction(text: str) -> bool:
     return any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS)
 
 
+def _normalized_mutating_tools(execution_facts: Dict[str, Any]) -> set[str]:
+    return {
+        str(item).strip().lower()
+        for item in (execution_facts or {}).get("mutating_tools") or []
+        if str(item).strip()
+    }
+
+
+def mutation_impact_from_facts(execution_facts: Dict[str, Any]) -> str:
+    facts = execution_facts if isinstance(execution_facts, dict) else {}
+    tools = _normalized_mutating_tools(facts)
+    if int(facts.get("repo_commit_calls") or 0) > 0 or (tools & _HIGH_IMPACT_MUTATION_TOOLS):
+        return "high"
+    if not tools and int(facts.get("write_ops_total") or 0) <= 0:
+        return "none"
+    if tools and tools.issubset(_LOW_IMPACT_MUTATION_TOOLS):
+        return "low"
+    if int(facts.get("write_ops_total") or 0) > 0:
+        return "medium"
+    return "none"
+
+
+def derive_outcome_constraints_from_facts(
+    *,
+    task_type: str,
+    execution_facts: Dict[str, Any],
+    final_text: str,
+) -> Dict[str, Any]:
+    facts = execution_facts if isinstance(execution_facts, dict) else default_execution_facts()
+    text = str(final_text or "").strip()
+    lowered = text.lower()
+    normalized_task_type = str(task_type or "").strip().lower()
+    impact = mutation_impact_from_facts(facts)
+
+    if bool(facts.get("provider_blocked")) or bool(facts.get("fallback_exhausted")):
+        return {
+            "forced_outcome": OUTCOME_BLOCKED_EXTERNAL,
+            "reason": "provider_or_fallback_blocked",
+            "allowed_outcomes": {OUTCOME_BLOCKED_EXTERNAL},
+            "semantic_adjudication": False,
+        }
+
+    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
+        return {
+            "forced_outcome": OUTCOME_BLOCKED_EXTERNAL,
+            "reason": "provider_or_quota_block_message",
+            "allowed_outcomes": {OUTCOME_BLOCKED_EXTERNAL},
+            "semantic_adjudication": False,
+        }
+
+    if int(facts.get("owner_message_requests") or 0) > 0:
+        return {
+            "forced_outcome": OUTCOME_NEEDS_OWNER_INPUT,
+            "reason": "agent_requested_owner_direction_marker",
+            "allowed_outcomes": {OUTCOME_NEEDS_OWNER_INPUT},
+            "semantic_adjudication": False,
+        }
+
+    if int(facts.get("repo_commit_calls") or 0) > 0:
+        return {
+            "forced_outcome": OUTCOME_COMMITTED,
+            "reason": "repo_commit_executed",
+            "allowed_outcomes": {OUTCOME_COMMITTED},
+            "semantic_adjudication": False,
+        }
+
+    if impact == "high":
+        return {
+            "forced_outcome": OUTCOME_EXECUTED_WORK,
+            "reason": "high_impact_mutation_executed",
+            "allowed_outcomes": {OUTCOME_EXECUTED_WORK},
+            "semantic_adjudication": False,
+        }
+
+    if int(facts.get("scheduled_task_calls") or 0) > 0 and impact == "none":
+        return {
+            "forced_outcome": OUTCOME_SCHEDULED_FOLLOWUP,
+            "reason": "followup_task_scheduled",
+            "allowed_outcomes": {OUTCOME_SCHEDULED_FOLLOWUP},
+            "semantic_adjudication": False,
+        }
+
+    if int(facts.get("tool_errors_total") or 0) > 0 and int(facts.get("tool_calls_total") or 0) == 0 and not text:
+        return {
+            "forced_outcome": OUTCOME_FAILED,
+            "reason": "tool_errors_without_progress",
+            "allowed_outcomes": {OUTCOME_FAILED},
+            "semantic_adjudication": False,
+        }
+
+    if not text:
+        return {
+            "forced_outcome": OUTCOME_FAILED,
+            "reason": "empty_final_text",
+            "allowed_outcomes": {OUTCOME_FAILED},
+            "semantic_adjudication": False,
+        }
+
+    if normalized_task_type == "evolution" and (_requests_owner_direction(text) or impact in {"low", "medium"}):
+        return {
+            "forced_outcome": "",
+            "reason": "evolution_semantic_adjudication_required",
+            "allowed_outcomes": {
+                OUTCOME_EXECUTED_WORK,
+                OUTCOME_SCHEDULED_FOLLOWUP,
+                OUTCOME_NEEDS_OWNER_INPUT,
+                OUTCOME_BLOCKED_EXTERNAL,
+                OUTCOME_REPORT_ONLY,
+                OUTCOME_FAILED,
+            },
+            "semantic_adjudication": True,
+        }
+
+    if int(facts.get("tool_calls_total") or 0) == 0:
+        allowed = {
+            OUTCOME_NEEDS_OWNER_INPUT,
+            OUTCOME_BLOCKED_EXTERNAL,
+            OUTCOME_REPORT_ONLY,
+            OUTCOME_FAILED,
+        }
+        if normalized_task_type != "evolution":
+            allowed.add(OUTCOME_VERIFIED_NO_CHANGE)
+        return {
+            "forced_outcome": "",
+            "reason": "text_only_completion_requires_adjudication",
+            "allowed_outcomes": allowed,
+            "semantic_adjudication": True,
+        }
+
+    if normalized_task_type == "review":
+        return {
+            "forced_outcome": "",
+            "reason": "review_semantic_adjudication_required",
+            "allowed_outcomes": {
+                OUTCOME_VERIFIED_NO_CHANGE,
+                OUTCOME_REPORT_ONLY,
+                OUTCOME_NEEDS_OWNER_INPUT,
+                OUTCOME_BLOCKED_EXTERNAL,
+                OUTCOME_FAILED,
+            },
+            "semantic_adjudication": True,
+        }
+
+    if impact in {"low", "medium"}:
+        allowed = {
+            OUTCOME_EXECUTED_WORK,
+            OUTCOME_NEEDS_OWNER_INPUT,
+            OUTCOME_BLOCKED_EXTERNAL,
+            OUTCOME_REPORT_ONLY,
+            OUTCOME_FAILED,
+        }
+        if normalized_task_type != "evolution":
+            allowed.add(OUTCOME_VERIFIED_NO_CHANGE)
+        return {
+            "forced_outcome": "",
+            "reason": f"{impact}_impact_mutation_requires_adjudication",
+            "allowed_outcomes": allowed,
+            "semantic_adjudication": True,
+        }
+
+    return {
+        "forced_outcome": OUTCOME_REPORT_ONLY,
+        "reason": "non_mutating_completion_requires_adjudication",
+        "allowed_outcomes": {OUTCOME_REPORT_ONLY},
+        "semantic_adjudication": False,
+    }
+
+
 def classify_outcome_from_facts(
     *,
     task_type: str,
@@ -135,76 +321,52 @@ def classify_outcome_from_facts(
     final_text: str,
 ) -> Dict[str, Any]:
     """Deterministic first-pass classification from runtime facts."""
-    facts = execution_facts if isinstance(execution_facts, dict) else default_execution_facts()
-    text = str(final_text or "").strip()
-    lowered = text.lower()
-
-    if bool(facts.get("provider_blocked")) or bool(facts.get("fallback_exhausted")):
+    constraints = derive_outcome_constraints_from_facts(
+        task_type=task_type,
+        execution_facts=execution_facts,
+        final_text=final_text,
+    )
+    forced_outcome = str(constraints.get("forced_outcome") or "").strip().lower()
+    reason = str(constraints.get("reason") or "").strip()
+    if forced_outcome:
         return build_execution_outcome(
-            OUTCOME_BLOCKED_EXTERNAL,
-            reason="provider_or_fallback_blocked",
+            forced_outcome,
+            reason=reason,
+            productive=forced_outcome in PRODUCTIVE_OUTCOME_CLASSES,
         )
-
-    if any(pattern in lowered for pattern in _BLOCKED_PATTERNS):
-        return build_execution_outcome(
-            OUTCOME_BLOCKED_EXTERNAL,
-            reason="provider_or_quota_block_message",
-        )
-
-    if _requests_owner_direction(text) or int(facts.get("owner_message_requests") or 0) > 0:
-        return build_execution_outcome(
-            OUTCOME_NEEDS_OWNER_INPUT,
-            reason="agent_requested_owner_direction",
-        )
-
-    if int(facts.get("repo_commit_calls") or 0) > 0:
-        return build_execution_outcome(
-            OUTCOME_COMMITTED,
-            reason="repo_commit_executed",
-        )
-
-    if int(facts.get("scheduled_task_calls") or 0) > 0:
-        return build_execution_outcome(
-            OUTCOME_SCHEDULED_FOLLOWUP,
-            reason="followup_task_scheduled",
-        )
-
-    if list(facts.get("mutating_tools") or []) or int(facts.get("write_ops_total") or 0) > 0:
-        return build_execution_outcome(
-            OUTCOME_EXECUTED_WORK,
-            reason="mutating_tool_executed",
-        )
-
-    if int(facts.get("tool_errors_total") or 0) > 0 and int(facts.get("tool_calls_total") or 0) == 0:
-        return build_execution_outcome(
-            OUTCOME_FAILED,
-            reason="tool_errors_without_progress",
-            productive=False,
-        )
-
-    if not text:
-        return build_execution_outcome(
-            OUTCOME_FAILED,
-            reason="empty_final_text",
-            productive=False,
-        )
-
-    if int(facts.get("tool_calls_total") or 0) == 0:
-        return build_execution_outcome(
-            OUTCOME_REPORT_ONLY,
-            reason="text_only_completion_without_tool_execution",
-            productive=False,
-        )
-
-    if str(task_type or "").strip().lower() == "review":
-        return build_execution_outcome(
-            OUTCOME_VERIFIED_NO_CHANGE,
-            reason="review_completed_without_mutation",
-        )
-
     return build_execution_outcome(
         OUTCOME_REPORT_ONLY,
-        reason="non_mutating_completion_requires_adjudication",
+        reason=reason or "semantic_adjudication_required",
+        productive=False,
+    )
+
+
+def resolve_outcome_conflict(
+    *,
+    constraints: Dict[str, Any],
+    candidate_outcome: Dict[str, Any],
+) -> Dict[str, Any]:
+    forced_outcome = str((constraints or {}).get("forced_outcome") or "").strip().lower()
+    allowed_outcomes = {
+        str(item).strip().lower()
+        for item in ((constraints or {}).get("allowed_outcomes") or set())
+        if str(item).strip()
+    }
+    candidate_class = str((candidate_outcome or {}).get("outcome_class") or "").strip().lower()
+    if forced_outcome:
+        return build_execution_outcome(
+            forced_outcome,
+            reason=str((constraints or {}).get("reason") or forced_outcome),
+            source=OUTCOME_SOURCE_RULE,
+            productive=forced_outcome in PRODUCTIVE_OUTCOME_CLASSES,
+        )
+    if candidate_class and (not allowed_outcomes or candidate_class in allowed_outcomes):
+        return candidate_outcome
+    fallback_reason = str((constraints or {}).get("reason") or "semantic_adjudication_required")
+    return build_execution_outcome(
+        OUTCOME_REPORT_ONLY,
+        reason=fallback_reason,
+        source=OUTCOME_SOURCE_RULE,
         productive=False,
     )
 
@@ -217,20 +379,31 @@ def maybe_adjudicate_outcome_with_model(
     deterministic_outcome: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Use a small model only for ambiguous semantic cases."""
-    outcome_class = str((deterministic_outcome or {}).get("outcome_class") or "").strip().lower()
-    outcome_reason = str((deterministic_outcome or {}).get("outcome_reason") or "").strip().lower()
-    if outcome_class != OUTCOME_REPORT_ONLY or outcome_reason != "non_mutating_completion_requires_adjudication":
+    constraints = derive_outcome_constraints_from_facts(
+        task_type=task_type,
+        execution_facts=execution_facts,
+        final_text=final_text,
+    )
+    if not bool(constraints.get("semantic_adjudication")):
         return deterministic_outcome
 
     if str(os.environ.get("OUROBOROS_ENABLE_OUTCOME_ADJUDICATION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
         return deterministic_outcome
 
     facts = execution_facts if isinstance(execution_facts, dict) else default_execution_facts()
+    allowed_outcomes = sorted(
+        str(item).strip().lower()
+        for item in ((constraints or {}).get("allowed_outcomes") or set())
+        if str(item).strip()
+    )
     prompt = (
-        "Classify this Ouroboros task completion. Use only one of these labels: "
-        "verified_no_change_needed, needs_owner_input, blocked_external, report_only.\n"
-        "Return strict JSON with keys outcome_class and outcome_reason.\n\n"
+        "Classify this Ouroboros task completion.\n"
+        "Return strict JSON with keys outcome_class, outcome_reason, confidence.\n"
+        "Choose ONLY from the allowed_outcomes list. Use semantic judgment, not just tool counts.\n"
+        "Treat cosmetic bookkeeping and owner-directed follow-up as non-productive.\n\n"
         f"task_type={str(task_type or '').strip().lower() or 'task'}\n"
+        f"allowed_outcomes={json.dumps(allowed_outcomes, ensure_ascii=False)}\n"
+        f"trigger_reason={json.dumps(str((constraints or {}).get('reason') or ''), ensure_ascii=False)}\n"
         f"execution_facts={json.dumps(facts, ensure_ascii=False, sort_keys=True)}\n"
         f"final_text={json.dumps(str(final_text or '')[:2000], ensure_ascii=False)}\n"
     )
@@ -259,17 +432,30 @@ def maybe_adjudicate_outcome_with_model(
         payload = json.loads(content[start:end + 1])
         candidate = str(payload.get("outcome_class") or "").strip().lower()
         reason = str(payload.get("outcome_reason") or "").strip()
-        if candidate not in {
-            OUTCOME_VERIFIED_NO_CHANGE,
-            OUTCOME_NEEDS_OWNER_INPUT,
-            OUTCOME_BLOCKED_EXTERNAL,
-            OUTCOME_REPORT_ONLY,
-        }:
-            return deterministic_outcome
-        return build_execution_outcome(
+        confidence = payload.get("confidence")
+        if candidate not in set(allowed_outcomes):
+            return resolve_outcome_conflict(
+                constraints=constraints,
+                candidate_outcome=deterministic_outcome,
+            )
+        resolved = build_execution_outcome(
             candidate,
             reason=reason or "model_adjudicated_ambiguous_completion",
             source=OUTCOME_SOURCE_MODEL,
+            confidence=confidence if isinstance(confidence, (int, float, str)) else None,
+        )
+        try:
+            conf_value = float(resolved.get("confidence"))
+        except Exception:
+            conf_value = 1.0
+        if conf_value < 0.7:
+            return resolve_outcome_conflict(
+                constraints=constraints,
+                candidate_outcome=deterministic_outcome,
+            )
+        return resolve_outcome_conflict(
+            constraints=constraints,
+            candidate_outcome=resolved,
         )
     except Exception:
         return deterministic_outcome
@@ -287,16 +473,9 @@ def apply_task_type_outcome_policy(
     current = str(outcome.get("outcome_class") or "").strip().lower()
     normalized_task_type = str(task_type or "").strip().lower()
     facts = execution_facts if isinstance(execution_facts, dict) else {}
-    text = str(final_text or "")
+    mutating_tools = _normalized_mutating_tools(facts)
 
     if normalized_task_type == "evolution":
-        if _requests_owner_direction(text):
-            return build_execution_outcome(
-                OUTCOME_NEEDS_OWNER_INPUT,
-                reason="agent_requested_owner_direction",
-                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
-                productive=False,
-            )
         if current == OUTCOME_REPORT_ONLY:
             return build_execution_outcome(
                 OUTCOME_FAILED,
@@ -304,7 +483,6 @@ def apply_task_type_outcome_policy(
                 source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
                 productive=False,
             )
-        mutating_tools = {str(item).strip().lower() for item in (facts.get("mutating_tools") or []) if str(item).strip()}
         if current == OUTCOME_EXECUTED_WORK and mutating_tools == {"knowledge_write"}:
             return build_execution_outcome(
                 OUTCOME_FAILED,

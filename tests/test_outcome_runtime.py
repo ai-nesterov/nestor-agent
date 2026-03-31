@@ -36,19 +36,30 @@ def test_apply_task_type_outcome_policy_fails_report_only_evolution():
 
 
 def test_classify_outcome_from_facts_detects_owner_direction_in_russian():
-    from ouroboros.outcome import classify_outcome_from_facts, default_execution_facts
+    from ouroboros.outcome import (
+        classify_outcome_from_facts,
+        default_execution_facts,
+        derive_outcome_constraints_from_facts,
+    )
 
     facts = default_execution_facts()
     facts["write_ops_total"] = 1
     facts["mutating_tools"] = ["knowledge_write"]
 
+    constraints = derive_outcome_constraints_from_facts(
+        task_type="evolution",
+        execution_facts=facts,
+        final_text="Для Evolution #14 нужна конкретная цель. Какая цель для Evolution #14?",
+    )
     outcome = classify_outcome_from_facts(
         task_type="evolution",
         execution_facts=facts,
         final_text="Для Evolution #14 нужна конкретная цель. Какая цель для Evolution #14?",
     )
 
-    assert outcome["outcome_class"] == "needs_owner_input"
+    assert constraints["semantic_adjudication"] is True
+    assert "needs_owner_input" in constraints["allowed_outcomes"]
+    assert outcome["outcome_class"] == "report_only"
     assert outcome["productive"] is False
 
 
@@ -69,6 +80,27 @@ def test_apply_task_type_outcome_policy_rejects_knowledge_only_evolution():
 
     assert adjusted["outcome_class"] == "failed"
     assert adjusted["outcome_reason"] == "evolution_knowledge_only_write_not_sufficient"
+
+
+def test_resolve_outcome_conflict_rejects_disallowed_model_verdict():
+    from ouroboros.outcome import resolve_outcome_conflict
+
+    resolved = resolve_outcome_conflict(
+        constraints={
+            "forced_outcome": "",
+            "reason": "text_only_completion_requires_adjudication",
+            "allowed_outcomes": {"report_only", "needs_owner_input"},
+        },
+        candidate_outcome={
+            "outcome_class": "executed_work",
+            "outcome_reason": "hallucinated_success",
+            "outcome_source": "model",
+            "productive": True,
+        },
+    )
+
+    assert resolved["outcome_class"] == "report_only"
+    assert resolved["outcome_reason"] == "text_only_completion_requires_adjudication"
 
 
 def test_store_task_result_persists_canonical_outcome(tmp_path):
