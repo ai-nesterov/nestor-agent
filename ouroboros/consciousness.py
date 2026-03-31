@@ -40,6 +40,7 @@ from ouroboros.context import (
     build_runtime_section, build_memory_sections,
     build_recent_sections, build_health_invariants, safe_read,
 )
+from supervisor.state import get_provider_quota_status
 
 log = logging.getLogger(__name__)
 
@@ -226,6 +227,22 @@ class BackgroundConsciousness:
                 if self._paused:
                     break
                 _use_local_light = use_local_for_lane("LIGHT")
+                if not _use_local_light:
+                    quota_status = get_provider_quota_status(self._llm.cloud_provider())
+                    if quota_status.get("hard_blocked"):
+                        append_jsonl(self._drive_root / "logs" / "events.jsonl", {
+                            "ts": utc_now_iso(),
+                            "type": "consciousness_quota_blocked",
+                            "reason": quota_status.get("reason", ""),
+                        })
+                        break
+                    if quota_status.get("soft_limited"):
+                        append_jsonl(self._drive_root / "logs" / "events.jsonl", {
+                            "ts": utc_now_iso(),
+                            "type": "consciousness_quota_deferred",
+                            "reason": quota_status.get("reason", ""),
+                        })
+                        break
                 self._emit_live_log(
                     "llm_round_started",
                     round=round_idx,

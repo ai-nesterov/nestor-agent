@@ -102,6 +102,27 @@ class TestEmitProgress(unittest.TestCase):
         self.assertEqual(bc._deferred_events[0]["type"], "send_message")
         self.assertEqual(bc._deferred_events[0]["text"], "💬 deferred thought")
 
+    def test_think_skips_when_minimax_quota_is_soft_limited(self):
+        bc, eq, drive_root = self._make_consciousness()
+        bc._max_bg_rounds = 1
+        bc._build_context = MagicMock(return_value="ctx")
+        bc._tool_schemas = MagicMock(return_value=[])
+        bc._llm.chat = MagicMock(side_effect=AssertionError("chat should not be called"))
+        bc._llm.cloud_provider = MagicMock(return_value="minimax")
+
+        with patch("ouroboros.consciousness.use_local_for_lane", return_value=False), \
+             patch("ouroboros.consciousness.get_provider_quota_status", return_value={
+                 "hard_blocked": False,
+                 "soft_limited": True,
+                 "reason": "MiniMax quota low",
+             }):
+            bc._think()
+
+        events_path = drive_root / "logs" / "events.jsonl"
+        self.assertTrue(events_path.exists())
+        content = events_path.read_text(encoding="utf-8")
+        self.assertIn("consciousness_quota_deferred", content)
+
 
 if __name__ == "__main__":
     unittest.main()

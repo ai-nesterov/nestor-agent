@@ -20,8 +20,9 @@ from typing import Tuple, Dict, Any, List, Optional
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 from ouroboros.pricing import emit_llm_usage_event, estimate_cost
 from supervisor.state import update_budget_from_usage
-from ouroboros.config import get_lane_model, use_local_for_lane
+from ouroboros.config import get_lane_model, use_local_for_lane, has_local_model_config
 from ouroboros.structured_output import extract_json_object
+from supervisor.state import get_provider_quota_status
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +116,16 @@ def _parse_safety_response(text: str) -> Optional[Dict[str, Any]]:
     return extract_json_object(text)
 
 
+def _force_local_if_quota_blocked(use_local: bool, provider: str) -> bool:
+    if use_local:
+        return True
+    quota_status = get_provider_quota_status(provider)
+    if quota_status.get("hard_blocked") and has_local_model_config():
+        log.warning("%s. Routing safety check to local fallback.", quota_status.get("reason") or "Provider quota exhausted")
+        return True
+    return use_local
+
+
 def check_safety(
     tool_name: str,
     arguments: Dict[str, Any],
@@ -141,6 +152,7 @@ def check_safety(
     fast_status = None
     fast_reason = None
     _use_local_light = use_local_for_lane("LIGHT")
+    _use_local_light = _force_local_if_quota_blocked(_use_local_light, client.cloud_provider())
     try:
         light_model = get_lane_model("LIGHT", prefer_local=_use_local_light) or DEFAULT_LIGHT_MODEL
         log.info(f"Running fast safety check on {tool_name} using {light_model} (local={_use_local_light})")
@@ -195,6 +207,7 @@ def check_safety(
 
     # ── Layer 2: Deep check (heavy model, with nudge to reduce false positives) ──
     _use_local_code = use_local_for_lane("CODE")
+    _use_local_code = _force_local_if_quota_blocked(_use_local_code, client.cloud_provider())
     try:
         heavy_model = get_lane_model("CODE", prefer_local=_use_local_code) or get_lane_model("MAIN", prefer_local=_use_local_code)
         log.info(f"Running deep safety check on {tool_name} using {heavy_model} (local={_use_local_code})")

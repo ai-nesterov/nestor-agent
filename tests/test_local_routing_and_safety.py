@@ -197,3 +197,12 @@ def test_parse_safety_response_handles_embedded_json_without_fences():
     )
 
     assert result == {"status": "SUSPICIOUS", "reason": "rm -rf"}
+
+
+def test_force_local_if_quota_blocked_uses_local_backend_when_available(monkeypatch):
+    from ouroboros.safety import _force_local_if_quota_blocked
+
+    monkeypatch.setattr("ouroboros.safety.get_provider_quota_status", lambda provider: {"hard_blocked": True, "reason": "MiniMax 5h quota exhausted"})
+    monkeypatch.setattr("ouroboros.safety.has_local_model_config", lambda: True)
+
+    assert _force_local_if_quota_blocked(False, "minimax") is True
