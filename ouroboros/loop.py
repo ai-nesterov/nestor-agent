@@ -32,9 +32,7 @@ from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, e
 from ouroboros.structured_output import strip_reasoning_artifacts
 from supervisor.state import get_provider_quota_status
 from ouroboros.outcome import (
-    OUTCOME_FAILED,
-    OUTCOME_SOURCE_RULE,
-    build_execution_outcome,
+    classify_outcome_from_facts,
     default_execution_facts,
 )
 
@@ -93,11 +91,10 @@ def _handle_text_response(
     facts = llm_trace.setdefault("execution_facts", default_execution_facts())
     facts["final_text_present"] = bool(cleaned.strip())
     facts["final_text_length"] = len(cleaned)
-    execution_outcome = build_execution_outcome(
-        OUTCOME_FAILED,
-        reason="unclassified_runtime_result",
-        source=OUTCOME_SOURCE_RULE,
-        productive=False,
+    execution_outcome = classify_outcome_from_facts(
+        task_type=str(llm_trace.get("task_type") or ""),
+        execution_facts=facts,
+        final_text=cleaned,
     )
     return cleaned, accumulated_usage, llm_trace, execution_outcome
 
@@ -112,11 +109,10 @@ def _finalize_loop_return(
     text = str(final_text or "")
     facts["final_text_present"] = bool(text.strip())
     facts["final_text_length"] = len(text)
-    outcome = execution_outcome or build_execution_outcome(
-        OUTCOME_FAILED,
-        reason="unclassified_runtime_result",
-        source=OUTCOME_SOURCE_RULE,
-        productive=False,
+    outcome = execution_outcome or classify_outcome_from_facts(
+        task_type=str(llm_trace.get("task_type") or ""),
+        execution_facts=facts,
+        final_text=text,
     )
     return text, accumulated_usage, llm_trace, outcome
 
@@ -352,6 +348,7 @@ def run_llm_loop(
         "reasoning_notes": [],
         "tool_calls": [],
         "execution_facts": default_execution_facts(),
+        "task_type": task_type,
     }
     llm_trace["execution_facts"]["executor_used"] = "ouroboros"
     accumulated_usage: Dict[str, Any] = {}
