@@ -234,6 +234,26 @@ def get_lane_model(lane: str, settings: Optional[dict] = None, prefer_local: Opt
     return cloud_model
 
 
+def get_local_lane_model(lane: str, settings: Optional[dict] = None) -> str:
+    """Return the best local model ID for a lane.
+
+    Preference order:
+    1) explicit LOCAL_MODEL_<LANE>
+    2) LOCAL_MODEL_MAIN for non-main lanes
+    3) cloud lane model as last-resort compatibility fallback
+    """
+    lane_name = str(lane or "").upper().strip()
+    local_key = _LANE_LOCAL_MODEL_KEYS.get(lane_name, "LOCAL_MODEL_MAIN")
+    local_model = str(_settings_value(settings, local_key, "") or "").strip()
+    if local_model:
+        return local_model
+    if lane_name != "MAIN":
+        main_local = str(_settings_value(settings, "LOCAL_MODEL_MAIN", "") or "").strip()
+        if main_local:
+            return main_local
+    return get_lane_model(lane_name, settings=settings, prefer_local=False)
+
+
 def resolve_effort(task_type: str) -> str:
     """Return the configured reasoning effort for the given task type."""
     t = (task_type or "").lower().strip()

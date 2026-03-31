@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ouroboros.config import (
     get_lane_model,
+    get_local_lane_model,
     get_cloud_provider,
     has_local_model_config,
     has_minimax_config,
@@ -789,10 +790,10 @@ class LLMClient:
             return requested_model
 
         preferred = [
-            get_lane_model("MAIN", prefer_local=True),
-            get_lane_model("LIGHT", prefer_local=True),
-            get_lane_model("CODE", prefer_local=True),
-            get_lane_model("FALLBACK", prefer_local=True),
+            get_local_lane_model("MAIN"),
+            get_local_lane_model("LIGHT"),
+            get_local_lane_model("CODE"),
+            get_local_lane_model("FALLBACK"),
             "Qwen/Qwen3.5-27B",
         ]
         for candidate in preferred:
@@ -990,9 +991,10 @@ class LLMClient:
         tool_choice: str,
         temperature: Optional[float],
     ) -> Dict[str, Any]:
+        normalized_messages = self._normalize_minimax_messages(messages)
         kwargs: Dict[str, Any] = {
             "model": model,
-            "messages": self._strip_cache_control(messages),
+            "messages": normalized_messages,
             "max_tokens": max_tokens,
         }
         if temperature is not None:
@@ -1004,6 +1006,62 @@ class LLMClient:
             ]
             kwargs["tool_choice"] = tool_choice
         return kwargs
+
+    @staticmethod
+    def _message_content_to_text(content: Any) -> str:
+        if isinstance(content, list):
+            parts: List[str] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            return "\n\n".join(p for p in parts if p).strip()
+        return str(content or "").strip()
+
+    def _prepend_text_block(self, content: Any, text: str) -> Any:
+        text = str(text or "").strip()
+        if not text:
+            return content
+        if isinstance(content, list):
+            blocks = copy.deepcopy(content)
+            blocks.insert(0, {"type": "text", "text": text})
+            return blocks
+        existing = str(content or "").strip()
+        return f"{text}\n\n{existing}".strip()
+
+    def _normalize_minimax_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize messages for MiniMax compatibility.
+
+        In practice MiniMax rejects our `system` role payloads, so fold all
+        system instructions into the first user turn and keep only
+        user/assistant/tool messages in the request.
+        """
+        cleaned = self._strip_cache_control(messages)
+        system_chunks: List[str] = []
+        normalized: List[Dict[str, Any]] = []
+
+        for msg in cleaned:
+            role = str(msg.get("role") or "").strip().lower()
+            msg_copy = copy.deepcopy(msg)
+            if role == "system":
+                text = self._message_content_to_text(msg_copy.get("content"))
+                if text:
+                    system_chunks.append(text)
+                continue
+            normalized.append(msg_copy)
+
+        if not system_chunks:
+            return normalized
+
+        system_prefix = "[System Instructions]\n" + "\n\n".join(chunk for chunk in system_chunks if chunk)
+        for msg in normalized:
+            if str(msg.get("role") or "").strip().lower() == "user":
+                msg["content"] = self._prepend_text_block(msg.get("content"), system_prefix)
+                return normalized
+
+        normalized.insert(0, {"role": "user", "content": system_prefix})
+        return normalized
 
     def _build_cloud_kwargs(
         self,

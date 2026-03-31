@@ -19,7 +19,7 @@ from ouroboros.tool_policy import initial_tool_schemas, list_non_core_tools
 from ouroboros.tools.registry import ToolRegistry
 from ouroboros.context_compaction import compact_tool_history_llm
 from ouroboros.utils import estimate_tokens
-from ouroboros.config import get_lane_model, use_local_for_lane
+from ouroboros.config import get_lane_model, get_local_lane_model, has_local_model_config, use_local_for_lane
 
 from ouroboros.loop_tool_execution import (
     StatefulToolExecutor,
@@ -34,6 +34,23 @@ from ouroboros.loop_llm_call import call_llm_with_retry, emit_llm_usage_event, e
 _call_llm_with_retry = call_llm_with_retry
 
 log = logging.getLogger(__name__)
+
+
+def _build_fallback_candidates(active_model: str, active_use_local: bool) -> List[Tuple[str, bool]]:
+    candidates: List[Tuple[str, bool]] = []
+
+    cloud_fallback_model = get_lane_model("FALLBACK", prefer_local=False).strip()
+    if not active_use_local and cloud_fallback_model and cloud_fallback_model != active_model:
+        candidates.append((cloud_fallback_model, False))
+
+    if has_local_model_config():
+        local_fallback_model = get_local_lane_model("FALLBACK").strip()
+        if local_fallback_model and not (active_use_local and local_fallback_model == active_model):
+            local_candidate = (local_fallback_model, True)
+            if local_candidate not in candidates:
+                candidates.append(local_candidate)
+
+    return candidates
 
 
 def _handle_text_response(
@@ -365,8 +382,8 @@ def run_llm_loop(
                 active_effort = _pre_checkpoint_effort
 
             if msg is None:
-                fallback_model = get_lane_model("FALLBACK", prefer_local=False).strip()
-                if not fallback_model or fallback_model == active_model:
+                fallback_candidates = _build_fallback_candidates(active_model, active_use_local)
+                if not fallback_candidates:
                     local_tag = " (local)" if active_use_local else ""
                     return (
                         f"⚠️ Failed to get a response from model {active_model}{local_tag} after {max_retries} attempts. "
@@ -374,21 +391,28 @@ def run_llm_loop(
                         f"If background consciousness is running, it will retry when the provider recovers."
                     ), accumulated_usage, llm_trace
 
-                fallback_use_local = use_local_for_lane("FALLBACK")
-                if fallback_use_local:
-                    fallback_model = get_lane_model("FALLBACK", prefer_local=True).strip()
                 primary_tag = " (local)" if active_use_local else ""
-                fallback_tag = " (local)" if fallback_use_local else ""
-                emit_progress(f"⚡ Fallback: {active_model}{primary_tag} → {fallback_model}{fallback_tag} after empty response")
-                msg, fallback_cost = call_llm_with_retry(
-                    llm, messages, fallback_model, tool_schemas, active_effort,
-                    max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
-                    use_local=fallback_use_local,
-                )
+                last_fallback_model = ""
+                last_fallback_use_local = False
+                for fallback_model, fallback_use_local in fallback_candidates:
+                    last_fallback_model = fallback_model
+                    last_fallback_use_local = fallback_use_local
+                    fallback_tag = " (local)" if fallback_use_local else ""
+                    emit_progress(
+                        f"⚡ Fallback: {active_model}{primary_tag} → {fallback_model}{fallback_tag} after empty response"
+                    )
+                    msg, fallback_cost = call_llm_with_retry(
+                        llm, messages, fallback_model, tool_schemas, active_effort,
+                        max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
+                        use_local=fallback_use_local,
+                    )
+                    if msg is not None:
+                        break
 
                 if msg is None:
+                    fallback_tag = " (local)" if last_fallback_use_local else ""
                     return (
-                        f"⚠️ All models are down. Primary ({active_model}{primary_tag}) and fallback ({fallback_model}{fallback_tag}) "
+                        f"⚠️ All models are down. Primary ({active_model}{primary_tag}) and fallback ({last_fallback_model}{fallback_tag}) "
                         f"both returned no response. Stopping. "
                         f"Background consciousness will attempt recovery when the provider is back."
                     ), accumulated_usage, llm_trace

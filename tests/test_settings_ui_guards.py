@@ -30,7 +30,7 @@ class TestSettingsUiGuards(unittest.TestCase):
     def test_models_section_explains_local_switching(self):
         source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")
         self.assertIn("These fields are cloud model IDs.", source)
-        self.assertIn("through the GGUF server configured above.", source)
+        self.assertIn("Local * Model ID", source)
 
     def test_save_reloads_settings_after_success(self):
         source = (REPO / "web/modules/settings.js").read_text(encoding="utf-8")
@@ -41,6 +41,7 @@ class TestSettingsUiGuards(unittest.TestCase):
         self.assertIn("Primary Cloud Provider", source)
         self.assertIn("MiniMax API Key", source)
         self.assertIn("MINIMAX_REQUESTS_5H_LIMIT", source)
+        self.assertIn("Consolidation Model", source)
 
     def test_wizard_mentions_minimax(self):
         source = (REPO / "launcher.py").read_text(encoding="utf-8")

@@ -42,3 +42,26 @@ def test_call_llm_with_retry_uses_minimax_provider_for_cloud_events(monkeypatch,
 
     assert msg["content"] == "ok"
     assert emitted[0]["provider"] == "minimax"
+
+
+def test_build_fallback_candidates_prefers_cloud_then_local(monkeypatch):
+    from ouroboros.loop import _build_fallback_candidates
+
+    monkeypatch.setattr("ouroboros.loop.get_lane_model", lambda lane, prefer_local=False: "MiniMax-M2.1")
+    monkeypatch.setattr("ouroboros.loop.get_local_lane_model", lambda lane: "Qwen/Qwen3.5-27B")
+    monkeypatch.setattr("ouroboros.loop.has_local_model_config", lambda: True)
+
+    assert _build_fallback_candidates("MiniMax-M2.5", active_use_local=False) == [
+        ("MiniMax-M2.1", False),
+        ("Qwen/Qwen3.5-27B", True),
+    ]
+
+
+def test_build_fallback_candidates_for_local_primary_skips_cloud_stage(monkeypatch):
+    from ouroboros.loop import _build_fallback_candidates
+
+    monkeypatch.setattr("ouroboros.loop.get_lane_model", lambda lane, prefer_local=False: "MiniMax-M2.1")
+    monkeypatch.setattr("ouroboros.loop.get_local_lane_model", lambda lane: "Qwen/Qwen3.5-27B")
+    monkeypatch.setattr("ouroboros.loop.has_local_model_config", lambda: True)
+
+    assert _build_fallback_candidates("Qwen/Qwen3.5-27B", active_use_local=True) == []

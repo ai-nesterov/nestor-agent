@@ -143,6 +143,30 @@ def test_build_minimax_kwargs_strips_openrouter_specific_fields():
     assert "cache_control" not in kwargs["tools"][0]
 
 
+def test_build_minimax_kwargs_folds_system_messages_into_first_user_turn():
+    from ouroboros.llm import LLMClient
+
+    client = LLMClient()
+    kwargs = client._build_minimax_kwargs(
+        messages=[
+            {"role": "system", "content": "global rules"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ],
+        model="MiniMax-M2.7",
+        tools=None,
+        reasoning_effort="medium",
+        max_tokens=1000,
+        tool_choice="auto",
+        temperature=None,
+    )
+
+    assert [m["role"] for m in kwargs["messages"]] == ["user", "assistant"]
+    assert "[System Instructions]" in kwargs["messages"][0]["content"]
+    assert "global rules" in kwargs["messages"][0]["content"]
+    assert "hello" in kwargs["messages"][0]["content"]
+
+
 def test_format_messages_for_safety_marks_omission():
     from ouroboros.safety import _format_messages_for_safety
 

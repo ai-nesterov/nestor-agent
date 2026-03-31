@@ -93,6 +93,9 @@ export function initSettings({ ws, state }) {
                     <div class="form-field"><label>Fallback Model</label><input id="s-model-fallback" value="anthropic/claude-sonnet-4.6" style="width:250px"></div>
                     <label class="local-toggle"><input type="checkbox" id="s-local-fallback"> Local</label>
                 </div>
+                <div class="form-row" style="align-items:flex-end">
+                    <div class="form-field"><label>Consolidation Model</label><input id="s-model-consolidation" value="anthropic/claude-sonnet-4.6" style="width:250px"></div>
+                </div>
                 <div class="form-row">
                     <div class="form-field"><label>Claude Code Model</label><input id="s-claude-code-model" value="opus" placeholder="sonnet, opus, or full name" style="width:250px"></div>
                 </div>
@@ -258,6 +261,7 @@ export function initSettings({ ws, state }) {
         if (s.OUROBOROS_MODEL_CODE) document.getElementById('s-model-code').value = s.OUROBOROS_MODEL_CODE;
         if (s.OUROBOROS_MODEL_LIGHT) document.getElementById('s-model-light').value = s.OUROBOROS_MODEL_LIGHT;
         if (s.OUROBOROS_MODEL_FALLBACK) document.getElementById('s-model-fallback').value = s.OUROBOROS_MODEL_FALLBACK;
+        if (s.OUROBOROS_MODEL_CONSOLIDATION) document.getElementById('s-model-consolidation').value = s.OUROBOROS_MODEL_CONSOLIDATION;
         if (s.CLAUDE_CODE_MODEL) document.getElementById('s-claude-code-model').value = s.CLAUDE_CODE_MODEL;
         document.getElementById('s-external-enabled').checked = s.EXTERNAL_EXECUTORS_ENABLED === true || s.EXTERNAL_EXECUTORS_ENABLED === 'True';
         document.getElementById('s-claude-enabled').checked = s.CLAUDE_CODE_ENABLED === true || s.CLAUDE_CODE_ENABLED === 'True';
@@ -403,6 +407,7 @@ export function initSettings({ ws, state }) {
             OUROBOROS_MODEL_CODE: document.getElementById('s-model-code').value,
             OUROBOROS_MODEL_LIGHT: document.getElementById('s-model-light').value,
             OUROBOROS_MODEL_FALLBACK: document.getElementById('s-model-fallback').value,
+            OUROBOROS_MODEL_CONSOLIDATION: document.getElementById('s-model-consolidation').value,
             CLAUDE_CODE_MODEL: document.getElementById('s-claude-code-model').value || 'opus',
             EXTERNAL_EXECUTORS_ENABLED: document.getElementById('s-external-enabled').checked,
             CLAUDE_CODE_ENABLED: document.getElementById('s-claude-enabled').checked,
