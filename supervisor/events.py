@@ -384,6 +384,10 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
             # Success: reset failure counter
             st["evolution_consecutive_failures"] = 0
             ctx.save_state(st)
+        elif rounds == 0:
+            # Task never started or was rejected immediately - don't count as failure
+            # This prevents false failures when task is simply not scheduled
+            pass
         else:
             # Likely failure (empty response or minimal work)
             failures = int(st.get("evolution_consecutive_failures") or 0) + 1
