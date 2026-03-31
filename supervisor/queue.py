@@ -480,8 +480,16 @@ def enforce_task_timeouts() -> None:
 # ---------------------------------------------------------------------------
 
 def build_evolution_task_text(cycle: int) -> str:
-    """Build evolution task text. Minimal trigger — SYSTEM.md has the full instructions."""
-    return f"EVOLUTION #{cycle}"
+    """Build evolution task text with explicit goal requirement.
+    
+    IMPORTANT: An evolution task MUST have a concrete goal - it should NOT just
+    check status and ask 'what next?'. If there's no specific improvement to make,
+    do NOT trigger evolution.
+    
+    The task should answer: What exact technical, cognitive, or existential
+    improvement will be made in THIS cycle?
+    """
+    return f"EVOLUTION #{cycle}: [SPECIFY CONCRETE GOAL]"
 
 
 def build_review_task_text(reason: str) -> str:
@@ -531,6 +539,8 @@ def enqueue_evolution_task_if_needed() -> None:
 
     Circuit breaker: pauses evolution after 3 consecutive failures to prevent
     burning budget on infinite retry loops.
+    Also checks for pending user tasks - don't trigger evolution if there
+    are actual tasks waiting to be processed.
     """
     if PENDING or RUNNING:
         return
@@ -546,6 +556,8 @@ def enqueue_evolution_task_if_needed() -> None:
     if consecutive_failures >= 3:
         st["evolution_mode_enabled"] = False
         save_state(st)
+        log.warning(f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
+                   f"Use /evolve start to resume.")
         send_with_budget(
             int(owner_chat_id),
             f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
