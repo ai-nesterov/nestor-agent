@@ -259,6 +259,10 @@ class LLMClient:
             return self._provider_override
         return get_cloud_provider()
 
+    def cloud_provider(self) -> str:
+        """Return the currently configured cloud provider."""
+        return self._get_cloud_provider()
+
     def _get_cloud_api_key(self, provider: Optional[str] = None) -> str:
         if self._api_key_override is not None:
             return self._api_key_override

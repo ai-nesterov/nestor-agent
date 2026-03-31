@@ -45,3 +45,40 @@ def test_llm_usage_writes_cached_tokens_and_cache_write_tokens(tmp_path):
     assert written.get("api_key_type") == "openrouter"
     assert written.get("cost_estimated") is False
     assert ctx.last_usage["cached_tokens"] == 1200
+
+
+def test_llm_usage_preserves_minimax_provider_fields(tmp_path):
+    from supervisor import events as ev_module
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+
+    class FakeCtx:
+        DRIVE_ROOT = tmp_path
+
+        def update_budget_from_usage(self, usage):
+            self.last_usage = usage
+
+    evt = {
+        "type": "llm_usage",
+        "model": "MiniMax-M2.7",
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "cost": 0.0,
+        },
+        "category": "task",
+        "provider": "minimax",
+        "source": "loop",
+        "model_category": "main",
+        "api_key_type": "minimax",
+        "cost_estimated": True,
+    }
+    ctx = FakeCtx()
+    ev_module._handle_llm_usage(evt, ctx)
+
+    events_file = tmp_path / "logs" / "events.jsonl"
+    written = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert written.get("provider") == "minimax"
+    assert written.get("api_key_type") == "minimax"
+    assert ctx.last_usage["provider"] == "minimax"

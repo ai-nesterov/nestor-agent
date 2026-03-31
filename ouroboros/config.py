@@ -47,6 +47,7 @@ SETTINGS_DEFAULTS = {
     "MINIMAX_BASE_URL": DEFAULT_MINIMAX_BASE_URL,
     "MINIMAX_PLAN_TYPE": "token_plan",
     "MINIMAX_PLAN_TIER": "",
+    "MINIMAX_REQUESTS_5H_LIMIT": 0,
     "LLM_PROVIDER": "openrouter",
     "OPENAI_API_KEY": "",
     "ANTHROPIC_API_KEY": "",
@@ -370,7 +371,7 @@ def apply_settings_to_env(settings: dict) -> None:
     """Push settings into environment variables for supervisor modules."""
     env_keys = [
         "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
-        "MINIMAX_API_KEY", "MINIMAX_BASE_URL", "MINIMAX_PLAN_TYPE", "MINIMAX_PLAN_TIER", "LLM_PROVIDER",
+        "MINIMAX_API_KEY", "MINIMAX_BASE_URL", "MINIMAX_PLAN_TYPE", "MINIMAX_PLAN_TIER", "MINIMAX_REQUESTS_5H_LIMIT", "LLM_PROVIDER",
         "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
         "OUROBOROS_MODEL", "OUROBOROS_MODEL_CODE", "OUROBOROS_MODEL_LIGHT",
         "OUROBOROS_MODEL_CONSOLIDATION",

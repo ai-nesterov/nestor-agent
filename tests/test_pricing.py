@@ -99,6 +99,9 @@ class TestInferApiKeyType:
     def test_unknown_defaults_openrouter(self):
         assert infer_api_key_type("some-random-model") == "openrouter"
 
+    def test_explicit_provider_minimax_wins(self):
+        assert infer_api_key_type("MiniMax-M2.7", provider="minimax") == "minimax"
+
 
 # --- infer_model_category ---
 
@@ -140,6 +143,21 @@ class TestEmitLlmUsageEvent:
         assert event["cost"] == 0.0105
         assert event["category"] == "task"
         assert "ts" in event
+
+    def test_emits_minimax_provider_and_api_key_type(self):
+        q = queue.Queue()
+        emit_llm_usage_event(
+            event_queue=q,
+            task_id="test-123",
+            model="MiniMax-M2.7",
+            usage={"prompt_tokens": 1000, "completion_tokens": 500},
+            cost=0.0,
+            category="task",
+            provider="minimax",
+        )
+        event = q.get_nowait()
+        assert event["provider"] == "minimax"
+        assert event["api_key_type"] == "minimax"
 
     def test_none_queue_no_error(self):
         # Should silently do nothing

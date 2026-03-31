@@ -111,8 +111,18 @@ def _normalize_model_name(model: str) -> str:
     return text
 
 
-def infer_api_key_type(model: str) -> str:
+def infer_api_key_type(model: str, provider: Optional[str] = None) -> str:
     """Infer which API key is used based on model name."""
+    provider_name = str(provider or "").strip().lower()
+    if provider_name:
+        if provider_name == "minimax":
+            return "minimax"
+        if provider_name == "local":
+            return "local"
+        if provider_name == "openai_websearch":
+            return "openai"
+        if provider_name == "openrouter":
+            return "openrouter"
     normalized = _normalize_model_name(model)
     if str(model or "").endswith(" (local)"):
         return "local"
@@ -168,7 +178,7 @@ def emit_llm_usage_event(
             "ts": utc_now_iso(),
             "task_id": task_id,
             "model": model,
-            "api_key_type": infer_api_key_type(model),
+            "api_key_type": infer_api_key_type(model, provider=resolved_provider),
             "model_category": infer_model_category(model),
             "provider": resolved_provider,
             "source": source,

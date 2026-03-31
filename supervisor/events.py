@@ -274,6 +274,8 @@ def _handle_llm_usage(evt: Dict[str, Any], ctx: Any) -> None:
         "completion_tokens": completion_tokens,
         "cached_tokens": cached_tokens,
         "cache_write_tokens": cache_write_tokens,
+        "provider": evt.get("provider", ""),
+        "api_key_type": evt.get("api_key_type", ""),
     }
     ctx.update_budget_from_usage(usage_for_budget)
 

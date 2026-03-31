@@ -158,6 +158,10 @@ def ensure_state_defaults(st: Dict[str, Any]) -> Dict[str, Any]:
     st.setdefault("last_reset_at", datetime.datetime.now(datetime.timezone.utc).date().isoformat())
     st.setdefault("external_budget_mode", "normal")
     st.setdefault("deferred_tasks", [])
+    st.setdefault("minimax_requests_5h_timestamps", [])
+    st.setdefault("minimax_requests_5h_used", 0)
+    st.setdefault("minimax_requests_5h_limit", 0)
+    st.setdefault("minimax_requests_5h_remaining", None)
     for legacy_key in ("approvals", "idle_cursor", "idle_stats", "last_idle_task_at",
                         "last_auto_review_at", "last_review_task_id", "session_daily_snapshot"):
         st.pop(legacy_key, None)
@@ -334,6 +338,20 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> None:
             log.debug(f"Failed to convert value to int: {v!r}", exc_info=True)
             return default
 
+    def _prune_minimax_rolling_window(timestamps: list[str]) -> list[str]:
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=5)
+        kept: list[str] = []
+        for raw in timestamps:
+            try:
+                ts = datetime.datetime.fromisoformat(str(raw))
+            except Exception:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+            if ts >= cutoff:
+                kept.append(ts.isoformat())
+        return kept
+
     # Step 1: Update budget counters under lock (fast, no I/O beyond Drive)
     lock_fd = acquire_file_lock(STATE_LOCK_PATH)
     try:
@@ -350,7 +368,28 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> None:
             usage.get("completion_tokens") if isinstance(usage, dict) else 0)
         st["spent_tokens_cached"] = _to_int(st.get("spent_tokens_cached") or 0) + _to_int(
             usage.get("cached_tokens") if isinstance(usage, dict) else 0)
-        should_check_ground_truth = (st["spent_calls"] % 50 == 0)
+        provider = str(usage.get("provider") if isinstance(usage, dict) else "").strip().lower()
+        if provider == "minimax":
+            timestamps = st.get("minimax_requests_5h_timestamps")
+            if not isinstance(timestamps, list):
+                timestamps = []
+            timestamps = _prune_minimax_rolling_window([str(ts) for ts in timestamps])
+            timestamps.append(datetime.datetime.now(datetime.timezone.utc).isoformat())
+            limit = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
+            st["minimax_requests_5h_timestamps"] = timestamps
+            st["minimax_requests_5h_used"] = len(timestamps)
+            st["minimax_requests_5h_limit"] = limit
+            st["minimax_requests_5h_remaining"] = max(0, limit - len(timestamps)) if limit > 0 else None
+        else:
+            timestamps = st.get("minimax_requests_5h_timestamps")
+            if isinstance(timestamps, list):
+                pruned = _prune_minimax_rolling_window([str(ts) for ts in timestamps])
+                st["minimax_requests_5h_timestamps"] = pruned
+                st["minimax_requests_5h_used"] = len(pruned)
+                limit = _to_int(os.environ.get("MINIMAX_REQUESTS_5H_LIMIT", st.get("minimax_requests_5h_limit") or 0))
+                st["minimax_requests_5h_limit"] = limit
+                st["minimax_requests_5h_remaining"] = max(0, limit - len(pruned)) if limit > 0 else None
+        should_check_ground_truth = (provider == "openrouter" and st["spent_calls"] % 50 == 0)
         _save_state_unlocked(st)
     finally:
         release_file_lock(STATE_LOCK_PATH, lock_fd)
