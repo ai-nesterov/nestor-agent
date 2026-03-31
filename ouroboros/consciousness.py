@@ -445,6 +445,9 @@ class BackgroundConsciousness:
 
         # Recent sections — empty task_id so we get ALL tasks' progress/tools/events
         parts.extend(build_recent_sections(memory, env, task_id=""))
+        outcomes_section = self._build_recent_outcomes_section()
+        if outcomes_section:
+            parts.append(outcomes_section)
 
         # Recent observations (consciousness-specific)
         observations = []
@@ -466,6 +469,43 @@ class BackgroundConsciousness:
         parts.append("## Background consciousness info\n\n" + "\n".join(bg_info_lines))
 
         return "\n\n".join(parts)
+
+    def _build_recent_outcomes_section(self) -> str:
+        """Surface canonical background-task outcomes to avoid narrative-only self-loops."""
+        results_dir = self._drive_root / "task_results"
+        if not results_dir.exists():
+            return ""
+
+        rows: list[dict[str, Any]] = []
+        for path in sorted(results_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:80]:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("caller_class") or "").strip().lower() != "consciousness":
+                continue
+            if str(payload.get("task_type") or payload.get("type") or "").strip().lower() != "task":
+                continue
+            rows.append(payload)
+            if len(rows) >= 12:
+                break
+
+        if not rows:
+            return ""
+
+        lines = ["## Background task outcomes"]
+        for row in rows:
+            ts = str(row.get("ts") or "")[:16]
+            outcome = str(row.get("outcome_class") or "?")
+            productive = "productive" if bool(row.get("productive")) else "non-productive"
+            desc = clip_text(str(row.get("description") or ""), 140)
+            reason = str(row.get("outcome_reason") or "").strip()
+            lines.append(f"- {ts} | {outcome} | {productive} | {desc}")
+            if reason:
+                lines.append(f"  reason: {reason}")
+        return "\n".join(lines)
 
     # -------------------------------------------------------------------
     # Tool registry (separate instance for consciousness, not shared with agent)
