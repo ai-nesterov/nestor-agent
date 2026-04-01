@@ -988,7 +988,8 @@ def assign_tasks() -> None:
 def ensure_workers_healthy() -> None:
     from supervisor import queue
     # Grace period: skip health check right after spawn — workers need time to initialize
-    if (time.time() - _LAST_SPAWN_TIME) < _SPAWN_GRACE_SEC:
+    alive_now = sum(1 for w in WORKERS.values() if w.proc.is_alive())
+    if (time.time() - _LAST_SPAWN_TIME) < _SPAWN_GRACE_SEC and alive_now > 0:
         return
     busy_crashes = 0
     dead_detections = 0
@@ -1047,7 +1048,6 @@ def ensure_workers_healthy() -> None:
             queue.persist_queue_snapshot(reason="worker_respawn_after_crash")
 
     now = time.time()
-    alive_now = sum(1 for w in WORKERS.values() if w.proc.is_alive())
     if dead_detections:
         # Count only meaningful failures:
         # - any crash while a task was running, or

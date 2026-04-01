@@ -6,7 +6,7 @@ import json
 import pathlib
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ouroboros.task_results import load_task_result
 
@@ -200,7 +200,7 @@ def select_next_objective(
     *,
     state: Dict[str, Any] | None = None,
     limit: int = 120,
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     candidates = collect_objective_candidates(drive_root, state=state, limit=limit)
     archive_path = pathlib.Path(drive_root) / "state" / "evolution_archive.jsonl"
     recent_rows = _read_jsonl_tail(archive_path, limit=80)
@@ -220,4 +220,4 @@ def select_next_objective(
             continue
         return candidate
 
-    return candidates[0]
+    return None

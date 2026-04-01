@@ -271,7 +271,7 @@ def build_recent_sections(memory: Memory, env: Any, task_id: str = "") -> List[s
     """Build recent dialogue and process-memory sections."""
     sections = []
 
-    chat_summary = memory.summarize_chat(memory.read_jsonl_tail("chat.jsonl", 200))
+    chat_summary = memory.summarize_chat(memory.read_jsonl_tail("chat.jsonl", 1000))
     if chat_summary:
         sections.append("## Recent chat\n\n" + chat_summary)
 

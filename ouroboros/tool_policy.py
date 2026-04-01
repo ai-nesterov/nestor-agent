@@ -85,9 +85,11 @@ def caller_can_schedule_external_executor(
     tt = str(task_type or "task").strip().lower()
     if cc == "consciousness":
         return bool(allow_consciousness)
+    if cc == "review":
+        return False
     if tt == "evolution":
         return bool(allow_evolution)
-    return cc in {"main_task_agent", "human_invoked", "task_agent", "review", ""}
+    return cc in {"main_task_agent", "human_invoked", "task_agent", ""}
 
 
 class ToolSchemaProvider(Protocol):

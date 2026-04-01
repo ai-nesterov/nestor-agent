@@ -32,6 +32,7 @@ from ouroboros.outcome import (
     classify_outcome_from_facts,
 )
 from ouroboros.evolution_archive import append_evolution_archive_entry
+from ouroboros.utils import safe_relpath
 
 # Lazy imports to avoid circular dependencies — everything comes through ctx
 
@@ -79,6 +80,63 @@ _EVOLUTION_REVIEW_FILES = (
 )
 _PRODUCTIVE_TASK_OUTCOMES = {"executed_work", "scheduled_followup", "committed"}
 _NONPRODUCTIVE_TASK_OUTCOMES = {"report_only", "needs_owner_input", "blocked_external"}
+
+
+def _extract_marker_section(text: str, marker: str, next_markers: tuple[str, ...]) -> str:
+    raw = str(text or "")
+    upper_raw = raw.upper()
+    start = upper_raw.find(marker)
+    if start < 0:
+        return ""
+    section_start = start + len(marker)
+    end = len(raw)
+    for candidate in next_markers:
+        pos = upper_raw.find(candidate, section_start)
+        if pos >= 0:
+            end = min(end, pos)
+    return raw[section_start:end].strip()
+
+
+def _parse_target_files_section(section: str) -> list[str]:
+    files: list[str] = []
+    for line in str(section or "").splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        cleaned = cleaned.lstrip("-*0123456789. ").strip()
+        cleaned = cleaned.strip("`").strip()
+        if cleaned:
+            files.append(cleaned)
+    return files
+
+
+def _validate_evolution_plan_payload(planner_payload: Dict[str, Any], repo_dir: pathlib.Path) -> tuple[bool, str]:
+    result_text = str(planner_payload.get("result") or "").strip()
+    plan_summary = _extract_marker_section(result_text, "PLAN_SUMMARY:", ("TARGET_FILES:", "VALIDATION:"))
+    target_files_section = _extract_marker_section(result_text, "TARGET_FILES:", ("VALIDATION:",))
+    validation = _extract_marker_section(result_text, "VALIDATION:", ())
+    if not plan_summary:
+        return False, "planner_empty_plan_summary"
+    if not validation:
+        return False, "planner_empty_validation_section"
+
+    target_files = _parse_target_files_section(target_files_section)
+    if not target_files:
+        return False, "planner_empty_target_files"
+
+    repo_root = pathlib.Path(repo_dir).resolve()
+    existing_targets = 0
+    for raw_path in target_files:
+        try:
+            candidate = (repo_root / safe_relpath(raw_path)).resolve()
+            candidate.relative_to(repo_root)
+        except Exception:
+            continue
+        if candidate.exists():
+            existing_targets += 1
+    if existing_targets == 0:
+        return False, "planner_target_files_missing"
+    return True, ""
 
 
 def _normalize_description(text: str) -> str:
@@ -421,6 +479,11 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     if task_kind == "evolution_plan":
         handled_special_task = True
         outcome, reason = _classify_evolution_plan_outcome(result_payload, evt)
+        if outcome == "scheduled_followup" and isinstance(result_payload, dict):
+            is_valid, validation_reason = _validate_evolution_plan_payload(result_payload, pathlib.Path(ctx.REPO_DIR))
+            if not is_valid:
+                outcome = "failed"
+                reason = validation_reason
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),

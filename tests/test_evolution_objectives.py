@@ -53,6 +53,27 @@ def test_select_next_objective_prefers_blocked_reason(tmp_path):
     assert "provider_or_fallback_blocked" in objective["description"]
 
 
+def test_select_next_objective_respects_cooldown_and_returns_none(tmp_path):
+    import time
+    from ouroboros.evolution_archive import append_evolution_archive_entry
+    from ouroboros.evolution_objectives import select_next_objective
+
+    append_evolution_archive_entry(
+        tmp_path,
+        {
+            "objective_description": "Address repeated evolution blocker: provider_or_fallback_blocked",
+            "ts_unix": time.time(),
+        },
+    )
+
+    objective = select_next_objective(
+        tmp_path,
+        state={"evolution_blocked_reason": "provider_or_fallback_blocked"},
+    )
+
+    assert objective is None
+
+
 def test_append_evolution_archive_entry_persists_row(tmp_path):
     from ouroboros.evolution_archive import append_evolution_archive_entry, evolution_archive_path
 

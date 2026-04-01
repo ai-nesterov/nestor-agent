@@ -340,6 +340,7 @@ class OuroborosAgent:
 
         finally:
             self._busy = False
+            os.environ.pop("OUROBOROS_CURRENT_TASK_ID", None)
             try:
                 from ouroboros.tools.browser import cleanup_browser
                 cleanup_browser(self.tools._ctx)

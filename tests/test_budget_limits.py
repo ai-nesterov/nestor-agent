@@ -126,7 +126,7 @@ class TestGlobalBudgetGuard:
         with patch.dict(os.environ, {"OUROBOROS_PER_TASK_COST_USD": "999"}):
             result = _check_budget_limits(**args)
         assert result is not None
-        text, _, _ = result
+        text, _, _, _ = result
         assert "budget exhausted" in text.lower()
 
     def test_under_50pct_passes(self, tmp_path):
@@ -172,12 +172,11 @@ class TestGlobalBudgetGuard:
 
 # --- use_local propagation ---
 
-class TestUseLocalPropagation:
-    """Ensure use_local is passed to _call_llm_with_retry on global budget stop."""
+class TestGlobalStopBehavior:
+    """Global budget stop should finalize immediately without another model call."""
 
     @patch("ouroboros.loop._call_llm_with_retry")
-    def test_global_stop_passes_use_local(self, mock_retry, tmp_path):
-        mock_retry.return_value = ({"content": "done"}, {"prompt_tokens": 10, "completion_tokens": 5})
+    def test_global_stop_skips_additional_llm_call(self, mock_retry, tmp_path):
         args = _make_args(
             budget_remaining_usd=6.0,
             accumulated_usage={"cost": 4.0},  # 67% > 50%
@@ -185,7 +184,8 @@ class TestUseLocalPropagation:
             drive_logs=tmp_path,
         )
         with patch.dict(os.environ, {"OUROBOROS_PER_TASK_COST_USD": "10.0"}):
-            _check_budget_limits(**args)
-        mock_retry.assert_called_once()
-        _, kwargs = mock_retry.call_args
-        assert kwargs.get("use_local") is True
+            result = _check_budget_limits(**args)
+        mock_retry.assert_not_called()
+        assert result is not None
+        text, _, _, _ = result
+        assert "budget exhausted" in text.lower()

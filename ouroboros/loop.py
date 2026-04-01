@@ -174,19 +174,8 @@ def _check_budget_limits(
 
     if budget_pct > 0.5:
         finish_reason = f"Task spent ${task_cost:.3f} (>50% of remaining ${budget_remaining_usd:.2f}). Budget exhausted."
-        messages.append({"role": "user", "content": f"[BUDGET LIMIT] {finish_reason} Give your final response now."})
-        try:
-            final_msg, final_cost = _call_llm_with_retry(
-                llm, messages, active_model, None, active_effort,
-                max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type,
-                use_local=use_local,
-            )
-            if final_msg:
-                return _finalize_loop_return(final_msg.get("content") or finish_reason, accumulated_usage, llm_trace)
-            return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
-        except Exception:
-            log.warning("Failed to get final response after budget limit", exc_info=True)
-            return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
+        messages.append({"role": "user", "content": f"[BUDGET LIMIT] {finish_reason}"})
+        return _finalize_loop_return(finish_reason, accumulated_usage, llm_trace)
     elif budget_pct > 0.3 and round_idx % 10 == 0:
         messages.append({"role": "user", "content": f"[INFO] Task spent ${task_cost:.3f} of ${budget_remaining_usd:.2f}. Wrap up if possible."})
 

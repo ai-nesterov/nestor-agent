@@ -69,6 +69,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", _settings.get("TELEGRA
 TELEGRAM_BOT_ENABLED = os.environ.get("TELEGRAM_BOT_ENABLED", str(_settings.get("TELEGRAM_BOT_ENABLED", False))).lower() in ("true", "1", "yes", "yes")
 TELEGRAM_INTERNAL_SECRET = os.environ.get("TELEGRAM_INTERNAL_SECRET", _settings.get("TELEGRAM_INTERNAL_SECRET", ""))
 TELEGRAM_ADMIN_CHAT_IDS = os.environ.get("TELEGRAM_ADMIN_CHAT_IDS", _settings.get("TELEGRAM_ADMIN_CHAT_IDS", ""))
+_IMPORT_PLACEHOLDER_TOKEN = "7123456789:AAFw_import_placeholder_token"
 
 SERVER_API_URL = f"http://127.0.0.1:8765/api/telegram/process-message"
 RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
@@ -156,37 +157,50 @@ async def _ensure_authorized(message: Message, command_name: str) -> bool:
     await message.answer("⛔ Эта команда недоступна для этого чата.")
     return False
 
-# ---------------------------------------------------------------------------
-# Health check
-# ---------------------------------------------------------------------------
-if not TELEGRAM_BOT_TOKEN:
-    log.error("TELEGRAM_BOT_TOKEN not configured. Exiting.")
-    sys.exit(1)
 
-if not TELEGRAM_BOT_ENABLED:
-    log.info("Telegram bot is disabled. Exiting.")
-    sys.exit(0)
+def _validate_runtime_configuration() -> int:
+    """Return process exit code for invalid runtime config, 0 when start is allowed."""
+    if not TELEGRAM_BOT_TOKEN:
+        log.error("TELEGRAM_BOT_TOKEN not configured. Exiting.")
+        return 1
+    if not TELEGRAM_BOT_ENABLED:
+        log.info("Telegram bot is disabled. Exiting.")
+        return 0
+    return -1
 
-if not TELEGRAM_INTERNAL_SECRET:
-    # Auto-generate secret if not configured
+
+def _ensure_internal_secret(persist: bool = True) -> bool:
+    """Ensure TELEGRAM_INTERNAL_SECRET is available before network operations."""
+    global TELEGRAM_INTERNAL_SECRET
+    if TELEGRAM_INTERNAL_SECRET:
+        return True
+
     import secrets
+
     TELEGRAM_INTERNAL_SECRET = secrets.token_urlsafe(32)
     _settings["TELEGRAM_INTERNAL_SECRET"] = TELEGRAM_INTERNAL_SECRET
-    
+    if not persist:
+        return True
+
     try:
         with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
             json.dump(_settings, f, indent=2, ensure_ascii=False)
         log.info("Auto-generated TELEGRAM_INTERNAL_SECRET and saved to settings.json")
+        return True
     except Exception:
         log.error("Failed to save auto-generated internal secret. Exiting.")
-        sys.exit(1)
+        return False
 
-log.info("Telegram bot starting (polling mode)...")
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+if TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_ENABLED:
+    log.info("Telegram bot starting (polling mode)...")
 
 # ---------------------------------------------------------------------------
 # Bot initialization
 # ---------------------------------------------------------------------------
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN or _IMPORT_PLACEHOLDER_TOKEN)
 dp = Dispatcher()
 
 # HTTP client for server communication
@@ -386,6 +400,11 @@ async def _forward_to_server(message: Message, text: str):
 # ---------------------------------------------------------------------------
 async def main():
     """Start the bot with polling"""
+    exit_code = _validate_runtime_configuration()
+    if exit_code >= 0:
+        raise SystemExit(exit_code)
+    if not _ensure_internal_secret(persist=True):
+        raise SystemExit(1)
     log.info("Starting Telegram bot polling...")
     
     try:

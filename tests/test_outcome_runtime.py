@@ -470,6 +470,69 @@ def test_handle_planner_task_done_requires_structured_success_before_enqueue(tmp
     assert "task_done" in snapshots
 
 
+def test_handle_planner_task_done_rejects_missing_target_files(tmp_path, monkeypatch):
+    from ouroboros.task_results import STATUS_RUNNING, load_task_result, write_task_result
+    from supervisor import events as ev_module
+
+    queued = []
+
+    monkeypatch.setattr("supervisor.queue.enqueue_task", lambda task, front=False: queued.append((dict(task), bool(front))) or dict(task))
+    monkeypatch.setattr("supervisor.queue.persist_queue_snapshot", lambda reason="": None)
+
+    write_task_result(
+        tmp_path,
+        "plan_missing",
+        STATUS_RUNNING,
+        task_type="task",
+        task_kind="evolution_plan",
+        evolution_cycle=7,
+        description="Plan a change",
+        objective_hypothesis="This would help.",
+        result=(
+            "PLAN_SUMMARY:\nTighten supervisor path.\n\n"
+            "TARGET_FILES:\n- missing/file.py\n\n"
+            "VALIDATION:\n- run targeted test\n"
+        ),
+    )
+
+    worker = SimpleNamespace(busy_task_id="plan_missing")
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        REPO_DIR = tmp_path
+        RUNNING = {"plan_missing": {"task": {"id": "plan_missing", "task_kind": "evolution_plan"}, "worker_id": 2}}
+        WORKERS = {2: worker}
+        bridge = _Bridge()
+
+        def load_state(self):
+            return {"owner_chat_id": 1, "evolution_cycle": 7}
+
+        def save_state(self, st):
+            return None
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_task_done(
+        {"type": "task_done", "task_id": "plan_missing", "task_type": "task", "worker_id": 2, "total_rounds": 1},
+        _Ctx(),
+    )
+
+    payload = load_task_result(tmp_path, "plan_missing")
+    assert payload["outcome_class"] == "failed"
+    assert payload["outcome_reason"] == "planner_target_files_missing"
+    assert not queued
+
+
 def test_handle_verifier_task_done_releases_running_worker(tmp_path):
     from ouroboros.task_results import STATUS_RUNNING, load_task_result, write_task_result
     from supervisor import events as ev_module

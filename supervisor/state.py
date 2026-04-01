@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import pathlib
+import threading
 import time
 import uuid
 from typing import Any, Dict, Optional
@@ -29,6 +30,7 @@ STATE_PATH: pathlib.Path = DRIVE_ROOT / "state" / "state.json"
 STATE_LAST_GOOD_PATH: pathlib.Path = DRIVE_ROOT / "state" / "state.last_good.json"
 STATE_LOCK_PATH: pathlib.Path = DRIVE_ROOT / "locks" / "state.lock"
 QUEUE_SNAPSHOT_PATH: pathlib.Path = DRIVE_ROOT / "state" / "queue_snapshot.json"
+_STATE_PROCESS_LOCK = threading.RLock()
 
 
 def init(drive_root: pathlib.Path, total_budget_limit: float = 0.0) -> None:
@@ -213,20 +215,43 @@ def _save_state_unlocked(st: Dict[str, Any]) -> None:
     atomic_write_text(STATE_LAST_GOOD_PATH, payload)
 
 
-def load_state() -> Dict[str, Any]:
-    lock_fd = acquire_file_lock(STATE_LOCK_PATH)
+def _state_lock_timeout_sec(default: float = 10.0) -> float:
     try:
-        return _load_state_unlocked()
-    finally:
-        release_file_lock(STATE_LOCK_PATH, lock_fd)
+        return max(4.0, float(os.environ.get("OUROBOROS_STATE_LOCK_TIMEOUT_SEC", str(default))))
+    except Exception:
+        return default
+
+
+def _load_state_read_only_fallback() -> Dict[str, Any]:
+    st_obj = json_load_file(STATE_PATH)
+    if st_obj is None:
+        st_obj = json_load_file(STATE_LAST_GOOD_PATH)
+    if st_obj is None:
+        return default_state_dict()
+    return ensure_state_defaults(st_obj)
+
+
+def load_state() -> Dict[str, Any]:
+    with _STATE_PROCESS_LOCK:
+        lock_fd = acquire_file_lock(STATE_LOCK_PATH, timeout_sec=_state_lock_timeout_sec())
+        if lock_fd is None:
+            log.warning("State lock unavailable after timeout; using read-only fallback load for %s", STATE_PATH)
+            return _load_state_read_only_fallback()
+        try:
+            return _load_state_unlocked()
+        finally:
+            release_file_lock(STATE_LOCK_PATH, lock_fd)
 
 
 def save_state(st: Dict[str, Any]) -> None:
-    lock_fd = acquire_file_lock(STATE_LOCK_PATH)
-    try:
-        _save_state_unlocked(st)
-    finally:
-        release_file_lock(STATE_LOCK_PATH, lock_fd)
+    with _STATE_PROCESS_LOCK:
+        lock_fd = acquire_file_lock(STATE_LOCK_PATH, timeout_sec=_state_lock_timeout_sec())
+        if lock_fd is None:
+            raise TimeoutError(f"Failed to acquire state lock for save: {STATE_LOCK_PATH}")
+        try:
+            _save_state_unlocked(st)
+        finally:
+            release_file_lock(STATE_LOCK_PATH, lock_fd)
 
 
 def init_state() -> Dict[str, Any]:
@@ -236,34 +261,37 @@ def init_state() -> Dict[str, Any]:
     Fetches OpenRouter ground truth and stores session_daily_snapshot and
     session_spent_snapshot for drift calculation.
     """
-    lock_fd = acquire_file_lock(STATE_LOCK_PATH)
-    try:
-        st = _load_state_unlocked()
+    with _STATE_PROCESS_LOCK:
+        lock_fd = acquire_file_lock(STATE_LOCK_PATH, timeout_sec=_state_lock_timeout_sec())
+        if lock_fd is None:
+            raise TimeoutError(f"Failed to acquire state lock for init: {STATE_LOCK_PATH}")
+        try:
+            st = _load_state_unlocked()
 
-        # Capture session snapshots for drift detection
-        st["session_spent_snapshot"] = float(st.get("spent_usd") or 0.0)
+            # Capture session snapshots for drift detection
+            st["session_spent_snapshot"] = float(st.get("spent_usd") or 0.0)
 
-        # Fetch OpenRouter ground truth to capture total_usd baseline
-        if get_cloud_provider() == "openrouter":
-            ground_truth = check_openrouter_ground_truth()
-            if ground_truth is not None:
-                st["session_total_snapshot"] = ground_truth["total_usd"]
-                st["openrouter_total_usd"] = ground_truth["total_usd"]
-                st["openrouter_daily_usd"] = ground_truth["daily_usd"]
-                st["openrouter_last_check_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            # Fetch OpenRouter ground truth to capture total_usd baseline
+            if get_cloud_provider() == "openrouter":
+                ground_truth = check_openrouter_ground_truth()
+                if ground_truth is not None:
+                    st["session_total_snapshot"] = ground_truth["total_usd"]
+                    st["openrouter_total_usd"] = ground_truth["total_usd"]
+                    st["openrouter_daily_usd"] = ground_truth["daily_usd"]
+                    st["openrouter_last_check_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                else:
+                    st["session_total_snapshot"] = 0.0
             else:
-                st["session_total_snapshot"] = 0.0
-        else:
-            st["session_total_snapshot"] = None
+                st["session_total_snapshot"] = None
 
-        # Reset drift tracking
-        st["budget_drift_pct"] = None
-        st["budget_drift_alert"] = False
+            # Reset drift tracking
+            st["budget_drift_pct"] = None
+            st["budget_drift_alert"] = False
 
-        _save_state_unlocked(st)
-        return st
-    finally:
-        release_file_lock(STATE_LOCK_PATH, lock_fd)
+            _save_state_unlocked(st)
+            return st
+        finally:
+            release_file_lock(STATE_LOCK_PATH, lock_fd)
 
 
 # ---------------------------------------------------------------------------

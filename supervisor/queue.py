@@ -56,6 +56,7 @@ QUEUE_SEQ_COUNTER_REF: Dict[str, int] = {"value": 0}
 # Lock for all mutations to PENDING, RUNNING, WORKERS shared collections.
 # Protects against concurrent access from main loop, direct-chat threads, watchdog.
 _queue_lock = threading.RLock()
+_evolution_schedule_lock = threading.Lock()
 
 
 def init_queue_refs(pending: List[Dict[str, Any]], running: Dict[str, Dict[str, Any]],
@@ -165,6 +166,9 @@ def reconcile_orphaned_scheduled_results(max_age_sec: int = 180, scan_limit: int
         age_sec = max(0.0, now - float(ts))
         if age_sec < float(max_age_sec):
             continue
+        with _queue_lock:
+            if any(str(t.get("id") or "") == task_id for t in PENDING if isinstance(t, dict)) or task_id in RUNNING:
+                continue
 
         reason = (
             "Task marked failed as orphaned: status=scheduled but task is missing "
@@ -226,8 +230,14 @@ def queue_has_task_type(task_type: str) -> bool:
 
 def persist_queue_snapshot(reason: str = "") -> None:
     """Save PENDING and RUNNING to snapshot file."""
+    with _queue_lock:
+        pending_snapshot = [dict(t) for t in PENDING]
+        running_snapshot = {
+            str(task_id): dict(meta) if isinstance(meta, dict) else meta
+            for task_id, meta in RUNNING.items()
+        }
     pending_rows = []
-    for t in PENDING:
+    for t in pending_snapshot:
         pending_rows.append({
             "id": t.get("id"), "type": t.get("type"), "priority": t.get("priority"),
             "attempt": t.get("_attempt"), "queued_at": t.get("queued_at"),
@@ -250,7 +260,7 @@ def persist_queue_snapshot(reason: str = "") -> None:
         })
     running_rows = []
     now = time.time()
-    for task_id, meta in RUNNING.items():
+    for task_id, meta in running_snapshot.items():
         task = meta.get("task") if isinstance(meta, dict) else {}
         started = float(meta.get("started_at") or 0.0) if isinstance(meta, dict) else 0.0
         hb = float(meta.get("last_heartbeat_at") or 0.0) if isinstance(meta, dict) else 0.0
@@ -264,7 +274,7 @@ def persist_queue_snapshot(reason: str = "") -> None:
     payload = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "reason": reason,
-        "pending_count": len(PENDING), "running_count": len(RUNNING),
+        "pending_count": len(pending_snapshot), "running_count": len(running_snapshot),
         "pending": pending_rows, "running": running_rows,
     }
     try:
@@ -330,39 +340,54 @@ def restore_pending_from_snapshot(max_age_sec: int = 900) -> int:
 def cancel_task_by_id(task_id: str) -> bool:
     """Cancel a task by ID (from PENDING or RUNNING)."""
     from supervisor import workers
+    from ouroboros.task_results import STATUS_CANCELLED, write_task_result
 
+    cancelled_pending = False
+    cancelled_running_worker = None
     with _queue_lock:
         for i, t in enumerate(list(PENDING)):
             if t["id"] == task_id:
                 PENDING.pop(i)
-                try:
-                    from ouroboros.task_results import STATUS_CANCELLED, write_task_result
-                    write_task_result(
-                        DRIVE_ROOT, task_id, STATUS_CANCELLED,
-                        result="Task cancelled by user/agent request.",
-                    )
-                except Exception:
-                    pass
-                persist_queue_snapshot(reason="cancel_pending")
-                return True
+                cancelled_pending = True
+                break
 
-        for w in workers.WORKERS.values():
-            if w.busy_task_id == task_id:
+        if not cancelled_pending:
+            for w in workers.WORKERS.values():
+                if w.busy_task_id != task_id:
+                    continue
                 RUNNING.pop(task_id, None)
-                try:
-                    from ouroboros.task_results import STATUS_CANCELLED, write_task_result
-                    write_task_result(
-                        DRIVE_ROOT, task_id, STATUS_CANCELLED,
-                        result="Running task cancelled and worker terminated.",
-                    )
-                except Exception:
-                    pass
-                if w.proc.is_alive():
-                    w.proc.terminate()
-                w.proc.join(timeout=5)
-                workers.respawn_worker(w.wid)
-                persist_queue_snapshot(reason="cancel_running")
-                return True
+                w.busy_task_id = None
+                cancelled_running_worker = w
+                break
+
+    if cancelled_pending:
+        try:
+            write_task_result(
+                DRIVE_ROOT, task_id, STATUS_CANCELLED,
+                result="Task cancelled by user/agent request.",
+            )
+        except Exception:
+            pass
+        persist_queue_snapshot(reason="cancel_pending")
+        return True
+
+    if cancelled_running_worker is not None:
+        try:
+            write_task_result(
+                DRIVE_ROOT, task_id, STATUS_CANCELLED,
+                result="Running task cancelled and worker terminated.",
+            )
+        except Exception:
+            pass
+        try:
+            if cancelled_running_worker.proc.is_alive():
+                cancelled_running_worker.proc.terminate()
+            cancelled_running_worker.proc.join(timeout=5)
+        except Exception:
+            log.warning("Failed to terminate worker %d during cancellation", cancelled_running_worker.wid, exc_info=True)
+        workers.respawn_worker(cancelled_running_worker.wid)
+        persist_queue_snapshot(reason="cancel_running")
+        return True
     return False
 
 
@@ -714,70 +739,77 @@ def enqueue_evolution_task_if_needed() -> None:
     Also checks for pending user tasks - don't trigger evolution if there
     are actual tasks waiting to be processed.
     """
-    if PENDING or RUNNING:
-        return
-    st = load_state()
-    if not bool(st.get("evolution_mode_enabled")):
-        return
-    owner_chat_id = st.get("owner_chat_id")
-    if not owner_chat_id:
-        return
-
-    # Circuit breaker: check for consecutive evolution failures
-    consecutive_failures = int(st.get("evolution_consecutive_failures") or 0)
-    if consecutive_failures >= 3:
-        st["evolution_mode_enabled"] = False
-        save_state(st)
-        log.warning(f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
-                   f"Use /evolve start to resume.")
-        send_with_budget(
-            int(owner_chat_id),
-            f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
-            f"Use /evolve start to resume after investigating the issue."
-        )
-        return
-
-    outcome = str(st.get("evolution_last_outcome") or "").strip().lower()
-    outcome_ts = parse_iso_to_ts(str(st.get("evolution_last_outcome_at") or ""))
-    owner_msg_ts = parse_iso_to_ts(str(st.get("last_owner_message_at") or ""))
-    if bool(st.get("evolution_waiting_for_owner")):
-        if owner_msg_ts is None or outcome_ts is None or owner_msg_ts <= outcome_ts:
+    with _evolution_schedule_lock:
+        with _queue_lock:
+            if PENDING or RUNNING:
+                return
+        st = load_state()
+        if not bool(st.get("evolution_mode_enabled")):
             return
-        st["evolution_waiting_for_owner"] = False
-        st["evolution_blocked_reason"] = ""
+        owner_chat_id = st.get("owner_chat_id")
+        if not owner_chat_id:
+            return
+
+        consecutive_failures = int(st.get("evolution_consecutive_failures") or 0)
+        if consecutive_failures >= 3:
+            st["evolution_mode_enabled"] = False
+            save_state(st)
+            log.warning(f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
+                       f"Use /evolve start to resume.")
+            send_with_budget(
+                int(owner_chat_id),
+                f"🧬⚠️ Evolution paused: {consecutive_failures} consecutive failures. "
+                f"Use /evolve start to resume after investigating the issue."
+            )
+            return
+
+        outcome = str(st.get("evolution_last_outcome") or "").strip().lower()
+        outcome_ts = parse_iso_to_ts(str(st.get("evolution_last_outcome_at") or ""))
+        owner_msg_ts = parse_iso_to_ts(str(st.get("last_owner_message_at") or ""))
+        if bool(st.get("evolution_waiting_for_owner")):
+            if owner_msg_ts is None or outcome_ts is None or owner_msg_ts <= outcome_ts:
+                return
+            st["evolution_waiting_for_owner"] = False
+            st["evolution_blocked_reason"] = ""
+            save_state(st)
+
+        cooldown_sec = _get_evolution_cooldown(outcome)
+        if cooldown_sec > 0 and outcome_ts is not None and (time.time() - outcome_ts) < cooldown_sec:
+            return
+
+        remaining = budget_remaining(st)
+        if remaining < EVOLUTION_BUDGET_RESERVE:
+            st["evolution_mode_enabled"] = False
+            save_state(st)
+            send_with_budget(int(owner_chat_id), f"💸 Evolution stopped: ${remaining:.2f} remaining (reserve ${EVOLUTION_BUDGET_RESERVE:.0f} for conversations).")
+            return
+
+        cycle = int(st.get("evolution_cycle") or 0) + 1
+        tid = uuid.uuid4().hex[:8]
+        objective = select_next_objective(DRIVE_ROOT, state=st)
+        if objective is None:
+            return
+        with _queue_lock:
+            if PENDING or RUNNING:
+                return
+            enqueue_task({
+                "id": tid,
+                "type": "task",
+                "task_kind": "evolution_plan",
+                "chat_id": int(owner_chat_id),
+                "text": build_evolution_plan_task_text(cycle, objective=objective),
+                "description": str(objective.get("description") or ""),
+                "context": str(objective.get("hypothesis") or ""),
+                "agent_role": "evolution_planner",
+                "evolution_cycle": cycle,
+                "objective_id": str(objective.get("id") or ""),
+                "objective_source": str(objective.get("source") or ""),
+                "objective_subsystem": str(objective.get("subsystem") or ""),
+                "objective_hypothesis": str(objective.get("hypothesis") or ""),
+                "acceptance_checks": list(objective.get("acceptance_checks") or []),
+            })
+        st["evolution_cycle"] = cycle
+        st["last_evolution_task_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         save_state(st)
-
-    cooldown_sec = _get_evolution_cooldown(outcome)
-    if cooldown_sec > 0 and outcome_ts is not None and (time.time() - outcome_ts) < cooldown_sec:
-        return
-
-    remaining = budget_remaining(st)
-    if remaining < EVOLUTION_BUDGET_RESERVE:
-        st["evolution_mode_enabled"] = False
-        save_state(st)
-        send_with_budget(int(owner_chat_id), f"💸 Evolution stopped: ${remaining:.2f} remaining (reserve ${EVOLUTION_BUDGET_RESERVE:.0f} for conversations).")
-        return
-
-    cycle = int(st.get("evolution_cycle") or 0) + 1
-    tid = uuid.uuid4().hex[:8]
-    objective = select_next_objective(DRIVE_ROOT, state=st)
-    enqueue_task({
-        "id": tid,
-        "type": "task",
-        "task_kind": "evolution_plan",
-        "chat_id": int(owner_chat_id),
-        "text": build_evolution_plan_task_text(cycle, objective=objective),
-        "description": str(objective.get("description") or ""),
-        "context": str(objective.get("hypothesis") or ""),
-        "agent_role": "evolution_planner",
-        "evolution_cycle": cycle,
-        "objective_id": str(objective.get("id") or ""),
-        "objective_source": str(objective.get("source") or ""),
-        "objective_subsystem": str(objective.get("subsystem") or ""),
-        "objective_hypothesis": str(objective.get("hypothesis") or ""),
-        "acceptance_checks": list(objective.get("acceptance_checks") or []),
-    })
-    st["evolution_cycle"] = cycle
-    st["last_evolution_task_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    save_state(st)
-    send_with_budget(int(owner_chat_id), f"🧬 Evolution #{cycle}: {tid}")
+        persist_queue_snapshot(reason="evolution_plan_enqueued")
+        send_with_budget(int(owner_chat_id), f"🧬 Evolution #{cycle}: {tid}")
