@@ -12,56 +12,165 @@ is tracked per-BrowserState via _thread_id.
 from __future__ import annotations
 
 import base64
+import importlib
 import logging
+import os
+import pathlib
 import subprocess
 import sys
 import threading
-from typing import Any, Dict, List
-
-try:
-    from playwright_stealth import Stealth
-    _HAS_STEALTH = True
-except ImportError:
-    _HAS_STEALTH = False
+from typing import Any, Dict, List, Optional
 
 from ouroboros.tools.registry import ToolContext, ToolEntry
 
 log = logging.getLogger(__name__)
 
 _playwright_ready = False
+_playwright_python: Optional[str] = None
+_HAS_STEALTH = False
 
 
-def _ensure_playwright_installed():
-    """Install Playwright and Chromium if not already available."""
+def _venv_python_path(env_dir: pathlib.Path) -> pathlib.Path:
+    if os.name == "nt":
+        return env_dir / "Scripts" / "python.exe"
+    return env_dir / "bin" / "python"
+
+
+def _venv_site_packages(env_dir: pathlib.Path) -> List[pathlib.Path]:
+    if os.name == "nt":
+        path = env_dir / "Lib" / "site-packages"
+        return [path] if path.exists() else []
+
+    lib_dir = env_dir / "lib"
+    if not lib_dir.exists():
+        return []
+    return sorted(p for p in lib_dir.glob("python*/site-packages") if p.exists())
+
+
+def _candidate_env_dirs(ctx: ToolContext) -> List[pathlib.Path]:
+    candidates = [
+        ctx.repo_dir / "nestor_agent_env",
+        ctx.repo_dir / ".venv",
+        ctx.repo_dir / "venv",
+    ]
+    return [p.resolve() for p in candidates if p.exists()]
+
+
+def _candidate_python_executables(ctx: ToolContext) -> List[str]:
+    candidates = []
+    for env_dir in _candidate_env_dirs(ctx):
+        py = _venv_python_path(env_dir)
+        if py.exists():
+            candidates.append(str(py))
+    candidates.append(sys.executable)
+    return candidates
+
+
+def _ensure_local_playwright_on_syspath(ctx: ToolContext) -> bool:
+    for env_dir in _candidate_env_dirs(ctx):
+        for site_packages in _venv_site_packages(env_dir):
+            if str(site_packages) not in sys.path:
+                sys.path.insert(0, str(site_packages))
+            try:
+                importlib.import_module("playwright")
+                return True
+            except ImportError:
+                continue
+    return False
+
+
+def _ensure_stealth_imported() -> None:
+    global _HAS_STEALTH
+    try:
+        importlib.import_module("playwright_stealth")
+        _HAS_STEALTH = True
+    except ImportError:
+        _HAS_STEALTH = False
+
+
+def _ensure_playwright_module(ctx: ToolContext) -> None:
+    try:
+        importlib.import_module("playwright")
+    except ImportError:
+        if _ensure_local_playwright_on_syspath(ctx):
+            _ensure_stealth_imported()
+            return
+        raise
+    _ensure_stealth_imported()
+
+
+def _detect_playwright_python(ctx: ToolContext) -> str:
+    global _playwright_python
+    if _playwright_python:
+        return _playwright_python
+    for candidate in _candidate_python_executables(ctx):
+        try:
+            res = subprocess.run(
+                [candidate, "-c", "import playwright; print('ok')"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if res.returncode == 0 and "ok" in (res.stdout or ""):
+                _playwright_python = candidate
+                return candidate
+        except Exception:
+            continue
+    _playwright_python = sys.executable
+    return _playwright_python
+
+
+def _run_playwright_python(cmd: List[str]) -> None:
+    subprocess.check_call(cmd)
+
+
+def _ensure_playwright_installed(ctx: ToolContext):
+    """Ensure Playwright is importable in-process and Chromium is installed in a local runtime."""
     global _playwright_ready
     if _playwright_ready:
         return
 
+    runtime_python = _detect_playwright_python(ctx)
+
     try:
-        import playwright  # noqa: F401
+        _ensure_playwright_module(ctx)
     except ImportError:
         if getattr(sys, 'frozen', False):
             raise RuntimeError(
                 "Browser tools require Playwright, which is not bundled. "
                 "Install manually: pip3 install playwright && python3 -m playwright install chromium"
             )
-        log.info("Playwright not found, installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
+        log.info("Playwright not found, installing into %s...", runtime_python)
+        try:
+            _run_playwright_python([runtime_python, "-m", "pip", "install", "playwright", "playwright-stealth"])
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Browser tools require Playwright, but automatic installation failed. "
+                "Create a virtualenv or install Playwright manually."
+            ) from e
+        _ensure_playwright_module(ctx)
 
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            pw.chromium.executable_path
-        log.info("Playwright chromium binary found")
+            executable = pathlib.Path(pw.chromium.executable_path)
+        if not executable.exists():
+            raise RuntimeError(f"Chromium executable missing at {executable}")
+        log.info("Playwright chromium binary found at %s", executable)
     except Exception:
         if getattr(sys, 'frozen', False):
             raise RuntimeError(
                 "Playwright chromium binary not found. "
                 "Install manually: python3 -m playwright install chromium"
             )
-        log.info("Installing Playwright chromium binary...")
-        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-        subprocess.check_call([sys.executable, "-m", "playwright", "install-deps", "chromium"])
+        log.info("Installing Playwright chromium binary via %s...", runtime_python)
+        try:
+            _run_playwright_python([runtime_python, "-m", "playwright", "install", "chromium"])
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Playwright is installed, but Chromium download failed. "
+                "Check network access or install Chromium manually for browser tools."
+            ) from e
 
     _playwright_ready = True
 
@@ -85,7 +194,7 @@ def _ensure_browser(ctx: ToolContext):
             log.debug("Browser connection check failed", exc_info=True)
         cleanup_browser(ctx)
 
-    _ensure_playwright_installed()
+    _ensure_playwright_installed(ctx)
 
     if bs.pw_instance is None:
         from playwright.sync_api import sync_playwright
@@ -112,6 +221,7 @@ def _ensure_browser(ctx: ToolContext):
     )
 
     if _HAS_STEALTH:
+        from playwright_stealth import Stealth
         stealth = Stealth()
         stealth.apply_stealth_sync(bs.page)
 
@@ -223,6 +333,36 @@ def _extract_page_output(page: Any, output: str, ctx: ToolContext) -> str:
         return text[:30000] + ("... [truncated]" if len(text) > 30000 else "")
 
 
+def _extract_links(page: Any) -> str:
+    links = page.evaluate("""() => Array.from(document.querySelectorAll('a[href]')).map((a) => ({
+        text: (a.innerText || a.textContent || '').trim(),
+        url: a.href || '',
+    }))""")
+    cleaned = []
+    for item in links or []:
+        url = str((item or {}).get("url") or "").strip()
+        text = str((item or {}).get("text") or "").strip()
+        if not url:
+            continue
+        cleaned.append({"text": text, "url": url})
+        if len(cleaned) >= 50:
+            break
+    return str(cleaned)
+
+
+def _extract_form_fields(page: Any) -> str:
+    fields = page.evaluate("""() => Array.from(document.querySelectorAll('input, textarea, select, button')).map((el) => ({
+        tag: el.tagName.toLowerCase(),
+        type: (el.getAttribute('type') || '').toLowerCase(),
+        name: el.getAttribute('name') || '',
+        id: el.id || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        value: 'value' in el ? String(el.value || '') : '',
+        text: (el.innerText || el.textContent || '').trim(),
+    }))""")
+    return str((fields or [])[:100])
+
+
 def _browse_page(ctx: ToolContext, url: str, output: str = "text",
                  wait_for: str = "", timeout: int = 30000,
                  viewport: str = "") -> str:
@@ -235,7 +375,11 @@ def _browse_page(ctx: ToolContext, url: str, output: str = "text",
             page.wait_for_selector(wait_for, timeout=timeout)
         return _extract_page_output(page, output, ctx)
     except Exception as e:
-        if _is_infrastructure_error(ctx):
+        had_browser_state = any(
+            getattr(ctx.browser_state, attr, None) is not None
+            for attr in ("pw_instance", "browser", "page")
+        )
+        if had_browser_state and _is_infrastructure_error(ctx):
             log.warning("Browser infrastructure error: %s. Cleaning up and retrying...", e)
             cleanup_browser(ctx)
             page = _ensure_browser(ctx)
@@ -279,6 +423,27 @@ def _browser_action(ctx: ToolContext, action: str, selector: str = "",
                 return "Error: selector required for select"
             page.select_option(selector, value, timeout=timeout)
             return f"Selected {value} in {selector}"
+        elif action == "navigate":
+            if not value:
+                return "Error: value (URL) required for navigate"
+            page.goto(value, timeout=timeout, wait_until="domcontentloaded")
+            return f"Navigated to: {value}"
+        elif action == "press":
+            if not selector:
+                return "Error: selector required for press"
+            if not value:
+                return "Error: value (key) required for press"
+            page.press(selector, value, timeout=timeout)
+            return f"Pressed {value} on {selector}"
+        elif action == "wait_for_text":
+            if not value:
+                return "Error: value (text) required for wait_for_text"
+            page.wait_for_function(
+                """(needle) => document.body && document.body.innerText.includes(needle)""",
+                value,
+                timeout=timeout,
+            )
+            return f"Found text: {value}"
         elif action == "screenshot":
             data = page.screenshot(type="png", full_page=False)
             b64 = base64.b64encode(data).decode()
@@ -304,13 +469,25 @@ def _browser_action(ctx: ToolContext, action: str, selector: str = "",
             elif direction == "bottom":
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             return f"Scrolled {direction}"
+        elif action == "extract_links":
+            return _extract_links(page)
+        elif action == "extract_form_fields":
+            return _extract_form_fields(page)
         else:
-            return f"Unknown action: {action}. Use: click, fill, select, screenshot, evaluate, scroll"
+            return (
+                "Unknown action: "
+                f"{action}. Use: click, fill, select, navigate, press, wait_for_text, "
+                "screenshot, evaluate, scroll, extract_links, extract_form_fields"
+            )
 
     try:
         return _do_action()
     except Exception as e:
-        if _is_infrastructure_error(ctx):
+        had_browser_state = any(
+            getattr(ctx.browser_state, attr, None) is not None
+            for attr in ("pw_instance", "browser", "page")
+        )
+        if had_browser_state and _is_infrastructure_error(ctx):
             log.warning("Browser infrastructure error: %s. Cleaning up and retrying...", e)
             cleanup_browser(ctx)
             return _do_action()
@@ -365,24 +542,30 @@ def get_tools() -> List[ToolEntry]:
                 "description": (
                     "Perform action on current browser page. Actions: "
                     "click (selector), fill (selector + value), select (selector + value), "
-                    "screenshot (base64 PNG), evaluate (JS code in value), "
-                    "scroll (value: up/down/top/bottom)."
+                    "navigate (value=url), press (selector + value=key), "
+                    "wait_for_text (value=text), screenshot (base64 PNG), "
+                    "evaluate (JS code in value), scroll (value: up/down/top/bottom), "
+                    "extract_links, extract_form_fields."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["click", "fill", "select", "screenshot", "evaluate", "scroll"],
+                            "enum": [
+                                "click", "fill", "select", "navigate", "press",
+                                "wait_for_text", "screenshot", "evaluate", "scroll",
+                                "extract_links", "extract_form_fields",
+                            ],
                             "description": "Action to perform",
                         },
                         "selector": {
                             "type": "string",
-                            "description": "CSS selector for click/fill/select",
+                            "description": "CSS selector for click/fill/select/press",
                         },
                         "value": {
                             "type": "string",
-                            "description": "Value for fill/select, JS for evaluate, direction for scroll",
+                            "description": "Value for fill/select, URL for navigate, key for press, text for wait_for_text, JS for evaluate, direction for scroll",
                         },
                         "timeout": {
                             "type": "integer",

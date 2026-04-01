@@ -1,8 +1,6 @@
 """Tests for browser state isolation and infrastructure error detection."""
 import types
 
-import pytest
-
 import ouroboros.tools.browser as browser_mod
 from ouroboros.tools.browser import _is_infrastructure_error, cleanup_browser
 
@@ -47,9 +45,18 @@ class TestCleanupBrowser:
                 browser=None,
                 pw_instance=None,
                 last_screenshot_b64=None,
+                _thread_id=123,
             )
         )
         cleanup_browser(ctx)
         assert ctx.browser_state.page is None
         assert ctx.browser_state.browser is None
         assert ctx.browser_state.pw_instance is None
+        assert ctx.browser_state._thread_id is None
+
+
+def test_browser_state_has_thread_id_field():
+    from ouroboros.tools.registry import BrowserState
+
+    state = BrowserState()
+    assert state._thread_id is None
