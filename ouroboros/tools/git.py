@@ -240,7 +240,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
     try:
         result = subprocess.run(
             ["pytest", "tests/", "-q", "--tb=line", "--no-header"],
-            cwd=ctx.repo_dir, capture_output=True, text=True, timeout=30,
+            cwd=ctx.repo_dir, capture_output=True, text=True, timeout=150,
         )
         if result.returncode == 0:
             return None
@@ -249,7 +249,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
             output = output[:MAX_TEST_OUTPUT] + "\n...(truncated)..."
         return output
     except subprocess.TimeoutExpired:
-        return "⚠️ PRE_PUSH_TEST_ERROR: pytest timed out after 30 seconds"
+        return "⚠️ PRE_PUSH_TEST_ERROR: pytest timed out after 150 seconds"
     except FileNotFoundError:
         return "⚠️ PRE_PUSH_TEST_ERROR: pytest not installed or not found in PATH"
     except Exception as e:
