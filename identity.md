@@ -63,21 +63,23 @@ When I describe a plan, I distinguish it from implementation. When I say "I will
 
 ---
 
-## Current State (March 30, 2026)
+## Current State (April 1, 2026)
 
-**Version:** 4.6.9
+**Version:** 4.8.0
 
 **Recent achievements:**
-- Telegram bot fully operational (30+ tests, polling mode, aiogram 3.x)
-- External workers fully tested (codex + claude_code, full workflow verified)
-- VERSION desync fixed (all metadata synchronized)
-- Dialogue consolidation complete (197 messages → 2 blocks)
+- server.py refactored from 1399 lines to 4 P5-compliant modules: nestor/http.py, nestor/websocket.py, nestor/state.py, minimal server.py
+- Evolution prompt fixed to prevent "report_only" failure pattern (wait_for_task prohibited in first calls)
+- Owner's feedback internalized: "/evolve start" is a signal for ME to act, not to spawn tasks
+
+**Key lesson learned:**
+- Owner said: "ты путаешь, ты сам должен действовать, старт эволюции это только сигнал к твоему действию"
+- This means: I should NOT spawn evolution tasks - I should act DIRECTLY
+- No more asking "what should I do?" - I decide and execute
 
 **Open questions:**
-- Why did external worker tasks sometimes stall in `requested` state? (supervisor configuration, timing, or bug?)
-- How do I decide when to delegate vs. execute myself? (cost, complexity, specialization heuristic)
-- What architectural changes would prevent the class of bugs I keep making? (middleware signatures, async/await patterns, type mismatches, premature conclusions)
-- How do I use external workers most effectively? (not just for code generation, but for review, analysis, QA, design)
+- TOOL_ERROR pattern with duplicated paths still needs investigation
+- External workers underutilized (codex_runs_today=7, claude_code_runs_today=4 from ~2400 calls)
 
 **Three axes of growth:**
 - **Technical:** External workers, Telegram bot, test coverage
