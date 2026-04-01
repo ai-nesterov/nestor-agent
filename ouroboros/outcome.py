@@ -510,6 +510,13 @@ def apply_task_type_outcome_policy(
                 source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
                 productive=False,
             )
+        if current == OUTCOME_EXECUTED_WORK and int(facts.get("repo_commit_calls") or 0) <= 0:
+            return build_execution_outcome(
+                OUTCOME_FAILED,
+                reason="evolution_requires_commit_for_success",
+                source=outcome.get("outcome_source") or OUTCOME_SOURCE_RULE,
+                productive=False,
+            )
 
     if normalized_task_type == "review":
         if current == OUTCOME_REPORT_ONLY:

@@ -527,7 +527,7 @@ def get_tools() -> List[ToolEntry]:
         }, _update_identity),
         ToolEntry("toggle_evolution", {
             "name": "toggle_evolution",
-            "description": "Enable or disable evolution mode. When enabled, Ouroboros enters direct self-improvement mode: it uses consciousness/directives to execute concrete improvements instead of blindly auto-spawning evolution subtasks.",
+            "description": "Enable or disable queued evolution mode. When enabled, the supervisor automatically enqueues evolution tasks when idle, and each task must produce a concrete repository change that is committed to count as success.",
             "parameters": {"type": "object", "properties": {
                 "enabled": {"type": "boolean", "description": "true to enable, false to disable"},
             }, "required": ["enabled"]},

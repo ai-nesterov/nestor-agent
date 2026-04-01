@@ -520,7 +520,7 @@ def build_evolution_task_text(cycle: int) -> str:
         "  with ONE specific question. \"I don't know what to do\" = FAILURE.\n\n"
         "SUCCESS CRITERIA:\n"
         "- Modified files exist (repo_write/str_replace_editor)\n"
-        "- Git commit created\n"
+        "- Git commit created via repo_commit\n"
         "- Nothing else counts as success.\n\n"
         "FAILURE OUTCOMES (use when stuck):\n"
         "- FAILED: something broke, can't complete\n"

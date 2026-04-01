@@ -446,7 +446,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         st["evolution_last_outcome_at"] = evt.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat()
         st["evolution_blocked_reason"] = blocked_reason
 
-        if outcome in {"executed_work", "scheduled_followup", "committed"}:
+        if outcome in {"scheduled_followup", "committed"}:
             st["evolution_consecutive_failures"] = 0
             st["evolution_waiting_for_owner"] = False
             ctx.save_state(st)

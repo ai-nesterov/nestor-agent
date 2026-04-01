@@ -82,6 +82,25 @@ def test_apply_task_type_outcome_policy_rejects_knowledge_only_evolution():
     assert adjusted["outcome_reason"] == "evolution_knowledge_only_write_not_sufficient"
 
 
+def test_apply_task_type_outcome_policy_requires_commit_for_evolution_success():
+    from ouroboros.outcome import apply_task_type_outcome_policy
+
+    adjusted = apply_task_type_outcome_policy(
+        task_type="evolution",
+        execution_outcome={
+            "outcome_class": "executed_work",
+            "outcome_reason": "mutating_tool_executed",
+            "outcome_source": "rule",
+            "productive": True,
+        },
+        final_text="Updated the runtime behavior.",
+        execution_facts={"mutating_tools": ["str_replace_editor"], "repo_commit_calls": 0},
+    )
+
+    assert adjusted["outcome_class"] == "failed"
+    assert adjusted["outcome_reason"] == "evolution_requires_commit_for_success"
+
+
 def test_resolve_outcome_conflict_rejects_disallowed_model_verdict():
     from ouroboros.outcome import resolve_outcome_conflict
 
