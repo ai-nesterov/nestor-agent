@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.8.0](https://img.shields.io/badge/version-4.8.0-green.svg)](VERSION)
+[![Version 4.8.1](https://img.shields.io/badge/version-4.8.1-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -269,6 +269,7 @@ Full text: [BIBLE.md](BIBLE.md)
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 4.8.1 | 2026-04-01 | Fix compaction loop: push compaction triggers from round>4/8 to round>8/20, message_count threshold from >40 to >60. Prevents reasoning trace destruction that caused evolution tasks to loop 46 rounds with no commits. | ouroboros |
 | 4.8.0 | 2026-04-01 | Refactor server.py (1399 lines) into P5-compliant modules: nestor/http.py (722), nestor/websocket.py (115), nestor/state.py (626), server.py (229). All modules < 1000 lines. Completed via external worker (codex). | ouroboros |
 | 4.7.4 | 2026-03-31 | Fix evolution prompt to prevent "report_only" failure pattern — evolution tasks now have strict rules: first tool call MUST be repo_read, second MUST be repo_write/str_replace_editor/commit. If wait_for_task() is called more than once, it's already failure. | ouroboros |
 | 4.7.1 | 2026-03-30 | Review executor feature: added configurable review_executor parameter to repo_commit (cloud/codex/claude_code/both). Implemented backend-agnostic review orchestrator with CLI isolation in temp worktrees. External workers can now be used for code review instead of cloud models ($0.00 vs $0.10). Full implementation delegated to codex executor (architectural analysis + code). Backward compatibility preserved (cloud review default).
