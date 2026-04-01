@@ -239,7 +239,7 @@ Available in the chat interface:
 | `/panic` | Emergency stop. Kills ALL processes, closes the application. |
 | `/restart` | Soft restart. Saves state, kills workers, re-launches. |
 | `/status` | Shows active workers, task queue, and budget breakdown. |
-| `/evolve start|stop` | Toggle autonomous evolution mode. `start` now signals direct action through background consciousness instead of auto-spawning an evolution task. |
+| `/evolve start|stop` | Toggle autonomous evolution mode. `start` enables the queued evolution loop: planner task -> implementer task -> verifier task when the system is idle. |
 | `/review` | Queue a deep review task (code, understanding, identity). |
 | `/bg` | Toggle background consciousness loop (start/stop/status). |
 

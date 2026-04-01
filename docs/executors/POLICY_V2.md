@@ -14,7 +14,7 @@ Working model:
 
 Scheduler now supports:
 - `task_type`: queue class (`task|review|evolution`)
-- `task_kind`: semantic class (`general|review_plan|review_code|refactor_plan|evolution_plan|implement`)
+- `task_kind`: semantic class (`general|review_plan|review_code|refactor_plan|evolution_plan|evolution_implement|evolution_verify|implement`)
 - `caller_class`: policy caller id (`main_task_agent|review|consciousness|...`)
 - `model_policy`: `cheap|balanced|premium|critical`
 - `model_override`: optional explicit model pin

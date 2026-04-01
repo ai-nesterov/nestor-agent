@@ -465,7 +465,7 @@ def get_tools() -> List[ToolEntry]:
                 "quota_class": {"type": "string", "enum": ["cheap", "expensive"], "default": "cheap"},
                 "priority": {"type": "integer", "default": 0},
                 "task_type": {"type": "string", "default": "task", "description": "queue task type: task|review|evolution"},
-                "task_kind": {"type": "string", "default": "general", "description": "semantic task class: general|review_plan|review_code|refactor_plan|evolution_plan|implement"},
+                "task_kind": {"type": "string", "default": "general", "description": "semantic task class: general|review_plan|review_code|refactor_plan|evolution_plan|evolution_implement|evolution_verify|implement"},
                 "caller_class": {"type": "string", "default": "main_task_agent", "description": "caller class for policy routing"},
                 "model_policy": {"type": "string", "enum": ["cheap", "balanced", "premium", "critical"], "default": "balanced"},
                 "model_override": {"type": "string", "description": "optional explicit model pin for this task"},

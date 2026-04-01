@@ -707,7 +707,7 @@ def _get_evolution_cooldown(outcome: str) -> int:
 
 
 def enqueue_evolution_task_if_needed() -> None:
-    """Enqueue evolution task if queue is empty and evolution mode is enabled.
+    """Enqueue the evolution planning stage if the queue is empty and evolution mode is enabled.
 
     Circuit breaker: pauses evolution after 3 consecutive failures to prevent
     burning budget on infinite retry loops.

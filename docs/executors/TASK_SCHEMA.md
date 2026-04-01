@@ -8,6 +8,7 @@ Status: normative for external executor scheduling.
 {
   "id": "string",
   "type": "task|review|evolution",
+  "task_kind": "general|review_plan|review_code|refactor_plan|evolution_plan|evolution_implement|evolution_verify|implement",
   "executor": "ouroboros|claude_code|codex",
   "executor_mode": "internal_agent|external_cli",
   "description": "string",
@@ -35,6 +36,7 @@ Status: normative for external executor scheduling.
 If fields are absent:
 - `executor = "ouroboros"`
 - `executor_mode = "internal_agent"`
+- `task_kind = "general"` for plain tasks, or a specific semantic kind for staged flows such as evolution planning / verification
 - `repo_scope = []`
 - `artifact_policy = "patch_only"`
 - `quota_class = "cheap"`

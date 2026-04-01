@@ -248,8 +248,9 @@ Navigation is a left sidebar with 8 pages.
 - **Stat cards**: Uptime, Workers (alive/total + progress bar), Budget (spent/limit + bar), Branch@SHA.
 - **Toggles**: Evolution Mode (on/off), Background Consciousness (on/off).
   Send `/evolve start|stop` and `/bg start|stop` via WebSocket command.
-  `/evolve start` now injects a direct-action directive into background consciousness
-  instead of auto-enqueueing a dedicated evolution task.
+  `/evolve start` now enables the queued evolution loop. When idle, the
+  supervisor enqueues an `evolution_plan` task, then spawns an
+  `evolution_implement` candidate and an `evolution_verify` task.
 - **Buttons**:
   - **Force Review** → sends `/review` command. Queues a deep code review task.
   - **Restart Agent** → sends `/restart` command. Graceful restart (save state, kill workers, exit 42).
@@ -359,7 +360,7 @@ Navigation is a left sidebar with 8 pages.
 | POST | `/api/local-model/start` | Start/download local model server |
 | POST | `/api/local-model/stop` | Stop local model server |
 | GET | `/api/local-model/status` | Local model status and readiness |
-| GET | `/api/evolution-data` | Evolution metrics per git tag (LOC, prompt sizes, memory) |
+| GET | `/api/evolution-data` | Evolution metrics per git tag plus archive summary (acceptance/rejection/cost breakdown) |
 | GET | `/api/chat/history` | Merged chat + system summaries + progress messages (chronological, limit param) |
 | POST | `/api/local-model/test` | Local model sanity test (chat + tool calling) |
 | POST | `/api/telegram/webhook` | Legacy webhook endpoint kept for compatibility |
@@ -389,7 +390,7 @@ Each iteration (0.5s sleep):
 2. `ensure_workers_healthy()` — respawn dead workers, detect crash storms
 3. Drain event queue (worker→supervisor events via multiprocessing.Queue)
 4. `enforce_task_timeouts()` — soft/hard timeout handling
-5. `enqueue_evolution_task_if_needed()` — enforce evolution cooldown / circuit breaker and allow direct-action evolution mode
+5. `enqueue_evolution_task_if_needed()` — enforce evolution cooldown / circuit breaker and enqueue the queued evolution planning stage when idle
 6. `assign_tasks()` — match pending tasks to free workers
 7. `persist_queue_snapshot()` — save queue state for crash recovery
 8. Poll `LocalChatBridge` inbox for user messages
@@ -402,7 +403,7 @@ Each iteration (0.5s sleep):
 | `/panic` | Kill workers (force), request restart exit |
 | `/restart` | Save state, safe_restart (git), kill workers, exit 42 |
 | `/review` | Queue a review task |
-| `/evolve start\|stop` | Toggle evolution mode; `start` also injects a direct-action evolution directive into background consciousness |
+| `/evolve start\|stop` | Toggle evolution mode; `start` enables the queued planner -> implementer -> verifier evolution loop |
 | `/bg start\|stop\|status` | Control background consciousness |
 | `/status` | Send status text with budget breakdown |
 | (anything else) | Route to agent via `handle_chat_direct()` |
