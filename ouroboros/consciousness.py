@@ -16,6 +16,7 @@ The consciousness:
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import json
 import logging
@@ -159,36 +160,54 @@ class BackgroundConsciousness:
     # -------------------------------------------------------------------
 
     def _loop(self) -> None:
-        """Daemon thread: sleep → wake → think → sleep."""
-        while not self._stop_event.is_set():
-            # Wait for next wakeup
-            self._wakeup_event.clear()
-            self._wakeup_event.wait(timeout=self._next_wakeup_sec)
+        """Daemon thread: sleep → wake → think → sleep.
 
-            if self._stop_event.is_set():
-                break
-
-            # Skip if paused (task running)
-            if self._paused:
-                continue
-
-            # Budget check
-            if not self._check_budget():
-                self._next_wakeup_sec = self._wakeup_max
-                continue
-
-            try:
-                self._think()
-            except Exception as e:
-                append_jsonl(self._drive_root / "logs" / "events.jsonl", {
-                    "ts": utc_now_iso(),
-                    "type": "consciousness_error",
-                    "error": repr(e),
-                    "traceback": traceback.format_exc()[:1500],
-                })
-                self._next_wakeup_sec = min(
-                    self._next_wakeup_sec * 2, self._wakeup_max
+        Uses asyncio event loop + run_coroutine_threadsafe to wake the sleep
+        from an external thread, avoiding the "cannot schedule new futures
+        after shutdown" error that occurs when a blocking wait() call races
+        with executor shutdown in the same thread.
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            while not self._stop_event.is_set():
+                # Wait for next wakeup via asyncio (non-blocking to this thread)
+                self._wakeup_event.clear()
+                wakeup_future = loop.run_in_executor(
+                    None,
+                    self._wakeup_event.wait,
                 )
+                try:
+                    loop.run_until_complete(asyncio.wait_for(wakeup_future, timeout=self._next_wakeup_sec))
+                except asyncio.TimeoutError:
+                    pass  # Normal timeout expiry
+
+                if self._stop_event.is_set():
+                    break
+
+                # Skip if paused (task running)
+                if self._paused:
+                    continue
+
+                # Budget check
+                if not self._check_budget():
+                    self._next_wakeup_sec = self._wakeup_max
+                    continue
+
+                try:
+                    self._think()
+                except Exception as e:
+                    append_jsonl(self._drive_root / "logs" / "events.jsonl", {
+                        "ts": utc_now_iso(),
+                        "type": "consciousness_error",
+                        "error": repr(e),
+                        "traceback": traceback.format_exc()[:1500],
+                    })
+                    self._next_wakeup_sec = min(
+                        self._next_wakeup_sec * 2, self._wakeup_max
+                    )
+        finally:
+            loop.close()
 
     def _check_budget(self) -> bool:
         """Check if background consciousness is within its budget allocation."""
