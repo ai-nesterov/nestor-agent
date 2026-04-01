@@ -103,6 +103,35 @@ def test_parse_compaction_summary_tolerates_marker_variants():
     }
 
 
+def test_loop_compaction_triggers_at_correct_thresholds():
+    """Compaction trigger thresholds must match the documented values in loop.py.
+
+    Regression test: previous settings (round_idx > 4, > 8) were too aggressive
+    for short tasks. Evolution tasks could run 46 rounds with 0 commits because
+    compact_tool_history_llm() fired every 8 rounds, destroying the reasoning
+    trace and forcing reorientation.
+    """
+    from ouroboros.loop import (
+        _COMPACTION_MESSAGE_THRESHOLD,
+        _COMPACTION_ROUND_THRESHOLD_MESSAGES,
+        _COMPACTION_ROUND_THRESHOLD_ALWAYS,
+    )
+
+    # First compaction: only fires after round > 20 (not round > 4)
+    assert _COMPACTION_ROUND_THRESHOLD_MESSAGES == 20, (
+        "First compaction should fire after round > 20 to preserve reasoning trace"
+    )
+
+    # Second compaction: only fires after round > 8 AND >60 messages
+    # (not round > 4 AND >40 messages)
+    assert _COMPACTION_ROUND_THRESHOLD_ALWAYS == 8, (
+        "Mid-round compaction should fire after round > 8, not > 4"
+    )
+    assert _COMPACTION_MESSAGE_THRESHOLD == 60, (
+        "Mid-round compaction should require > 60 messages, not > 40"
+    )
+
+
 def test_compact_tool_history_llm_accepts_inline_marker_text(monkeypatch):
     msgs = _make_messages("run_shell", "ok", num_rounds=10)
 
