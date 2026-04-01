@@ -23,6 +23,7 @@ from supervisor.state import (
     budget_remaining, EVOLUTION_BUDGET_RESERVE,
 )
 from supervisor.message_bus import send_with_budget
+from ouroboros.evolution_objectives import select_next_objective
 
 log = logging.getLogger(__name__)
 
@@ -480,7 +481,7 @@ def enforce_task_timeouts() -> None:
 # Evolution + review scheduling
 # ---------------------------------------------------------------------------
 
-def build_evolution_task_text(cycle: int) -> str:
+def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = None) -> str:
     """Build evolution task text for autonomous cycles.
 
     FAILURE PATTERN: The system gets stuck in "report_only" mode - repeatedly
@@ -501,12 +502,32 @@ def build_evolution_task_text(cycle: int) -> str:
     DO NOT: plan, analyze, think about, check status, wait, reflect.
     DO: read file, change file, commit.
     """
+    objective = objective if isinstance(objective, dict) else {}
+    description = str(objective.get("description") or "Make one small, concrete improvement to the agent runtime.").strip()
+    hypothesis = str(objective.get("hypothesis") or "A concrete repository improvement is better than idle reflection.").strip()
+    subsystem = str(objective.get("subsystem") or "runtime").strip()
+    acceptance_checks = [str(item).strip() for item in (objective.get("acceptance_checks") or []) if str(item).strip()]
+    if not acceptance_checks:
+        acceptance_checks = [
+            "Modify a repository file",
+            "Create a repo_commit",
+            "Explain the concrete improvement achieved",
+        ]
+    acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks)
     return (
         f"EVOLUTION #{cycle}\n\n"
         "Autonomous cycle.\n\n"
+        "OBJECTIVE:\n"
+        f"- {description}\n\n"
+        "HYPOTHESIS:\n"
+        f"- {hypothesis}\n\n"
+        "TARGET SUBSYSTEM:\n"
+        f"- {subsystem}\n\n"
+        "ACCEPTANCE:\n"
+        f"{acceptance_lines}\n"
         "INSTRUCTIONS:\n"
-        "1. Read ONE file that needs improvement (VERSION, scratchpad, knowledge)\n"
-        "2. Make ONE concrete change to that file\n"
+        "1. Read the relevant repository file(s) for the objective\n"
+        "2. Make ONE concrete repository change that advances the objective\n"
         "3. Commit the change\n\n"
         "RULES:\n"
         "- First tool call MUST be repo_read or str_replace_editor\n"
@@ -661,10 +682,18 @@ def enqueue_evolution_task_if_needed() -> None:
 
     cycle = int(st.get("evolution_cycle") or 0) + 1
     tid = uuid.uuid4().hex[:8]
+    objective = select_next_objective(DRIVE_ROOT, state=st)
     enqueue_task({
         "id": tid, "type": "evolution",
         "chat_id": int(owner_chat_id),
-        "text": build_evolution_task_text(cycle),
+        "text": build_evolution_task_text(cycle, objective=objective),
+        "description": str(objective.get("description") or ""),
+        "context": str(objective.get("hypothesis") or ""),
+        "objective_id": str(objective.get("id") or ""),
+        "objective_source": str(objective.get("source") or ""),
+        "objective_subsystem": str(objective.get("subsystem") or ""),
+        "objective_hypothesis": str(objective.get("hypothesis") or ""),
+        "acceptance_checks": list(objective.get("acceptance_checks") or []),
     })
     st["evolution_cycle"] = cycle
     st["last_evolution_task_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()

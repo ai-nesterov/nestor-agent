@@ -172,6 +172,11 @@ class OuroborosAgent:
                 parent_task_id=task.get("parent_task_id"),
                 description=task.get("description"),
                 context=task.get("context"),
+                objective_id=task.get("objective_id"),
+                objective_source=task.get("objective_source"),
+                objective_subsystem=task.get("objective_subsystem"),
+                objective_hypothesis=task.get("objective_hypothesis"),
+                acceptance_checks=task.get("acceptance_checks") or [],
                 result="Task is running.",
             )
         except Exception:

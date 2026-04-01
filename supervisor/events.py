@@ -31,6 +31,7 @@ from ouroboros.outcome import (
     apply_task_type_outcome_policy,
     classify_outcome_from_facts,
 )
+from ouroboros.evolution_archive import append_evolution_archive_entry
 
 # Lazy imports to avoid circular dependencies — everything comes through ctx
 
@@ -445,6 +446,37 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
         st["evolution_last_outcome"] = outcome
         st["evolution_last_outcome_at"] = evt.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat()
         st["evolution_blocked_reason"] = blocked_reason
+        try:
+            archive_payload = result_payload if isinstance(result_payload, dict) else {}
+            execution_facts = archive_payload.get("execution_facts") if isinstance(archive_payload.get("execution_facts"), dict) else {}
+            append_evolution_archive_entry(
+                ctx.DRIVE_ROOT,
+                {
+                    "task_id": str(task_id or ""),
+                    "objective_id": archive_payload.get("objective_id"),
+                    "objective_source": archive_payload.get("objective_source"),
+                    "objective_subsystem": archive_payload.get("objective_subsystem"),
+                    "objective_description": archive_payload.get("description"),
+                    "objective_hypothesis": archive_payload.get("objective_hypothesis"),
+                    "acceptance_checks": archive_payload.get("acceptance_checks") or [],
+                    "outcome_class": outcome,
+                    "outcome_reason": blocked_reason,
+                    "outcome_source": outcome_source,
+                    "cost_usd": float(evt.get("cost_usd") or 0.0),
+                    "total_rounds": int(evt.get("total_rounds") or 0),
+                    "repo_commit_calls": int(execution_facts.get("repo_commit_calls") or 0),
+                    "write_ops_total": int(execution_facts.get("write_ops_total") or 0),
+                    "tool_errors_total": int(execution_facts.get("tool_errors_total") or 0),
+                    "files_changed": [],
+                    "tests_run": archive_payload.get("tests_run") or [],
+                    "tests_passed": archive_payload.get("tests_passed"),
+                    "candidate_sha": archive_payload.get("candidate_sha"),
+                    "parent_sha": archive_payload.get("parent_sha"),
+                    "ts_unix": time.time(),
+                },
+            )
+        except Exception:
+            log.warning("Failed to append evolution archive entry for task %s", task_id, exc_info=True)
 
         if outcome in {"scheduled_followup", "committed"}:
             st["evolution_consecutive_failures"] = 0
