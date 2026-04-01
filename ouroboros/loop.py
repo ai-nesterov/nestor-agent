@@ -14,6 +14,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import logging
 
+# Compaction trigger thresholds (documented in loop._main_loop):
+# - round > 8  AND len(messages) > 60  → mid-round compaction (keep_recent=12)
+# - round > 20                         → aggressive compaction (keep_recent=10)
+#
+# Previous settings (round > 4, > 8 and message_count > 40) were too aggressive
+# for short tasks. Evolution tasks could run 46 rounds with 0 commits because
+# compact_tool_history_llm() destroyed the reasoning trace every 8 rounds.
+_COMPACTION_ROUND_THRESHOLD_ALWAYS = 8
+_COMPACTION_MESSAGE_THRESHOLD = 60
+_COMPACTION_ROUND_THRESHOLD_MESSAGES = 20
+
 from ouroboros.llm import LLMClient, normalize_reasoning_effort, add_usage
 from ouroboros.tool_policy import initial_tool_schemas, list_non_core_tools
 from ouroboros.tools.registry import ToolRegistry
@@ -418,10 +429,10 @@ def run_llm_loop(
             if pending_compaction is not None:
                 messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=pending_compaction)
                 tools._ctx._pending_compaction = None
-            elif round_idx > 20:
+            elif round_idx > _COMPACTION_ROUND_THRESHOLD_MESSAGES:
                 messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=10)
-            elif round_idx > 8:
-                if len(messages) > 60:
+            elif round_idx > _COMPACTION_ROUND_THRESHOLD_ALWAYS:
+                if len(messages) > _COMPACTION_MESSAGE_THRESHOLD:
                     messages, _compaction_usage = compact_tool_history_llm(messages, keep_recent=12)
             if tools._ctx.messages is not messages:
                 tools._ctx.messages = messages
