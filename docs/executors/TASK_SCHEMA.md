@@ -58,7 +58,6 @@ Tasks with same description but different executor are not automatically duplica
 
 v1 policy defaults:
 - Main task agent: external executor allowed.
-- Review tasks: external executor disallowed.
+- Review tasks: external executor allowed when policy/config enables review-side escalation.
 - Consciousness: disallowed.
 - Evolution: disallowed by default.
-

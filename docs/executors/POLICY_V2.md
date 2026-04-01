@@ -3,7 +3,12 @@
 ## Scope split
 
 - `ouroboros`: dialogue, reasoning, self-reflection, final coordination.
-- external workers (`claude_code`, `codex`): planning tasks, review tasks, implementation tasks.
+- external workers (`claude_code`, `codex`): planning tasks, review tasks, implementation tasks when the job has become harder than the main agent should handle alone in one comfortable pass.
+
+Working model:
+- the main agent remains primary and should solve straightforward work itself
+- external workers are the escalation path when the task is too complex, the agent is getting stuck, or a stronger specialist pass is warranted
+- use them the way you would ask a more experienced colleague for help
 
 ## Task metadata
 

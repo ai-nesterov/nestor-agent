@@ -44,16 +44,26 @@ def recommend_executor(
 ) -> str:
     """Heuristic recommendation for schedule_task(executor=...).
 
-    v1 routing rubric:
-    - ouroboros: planning, review, analysis, small/general tasks
-    - claude_code: architecture-heavy multi-file refactors
-    - codex: deterministic implementation-heavy tasks
+    External executors are escalation paths, not the default.
+
+    Working rubric:
+    - ouroboros: straightforward work the main agent can handle comfortably
+    - claude_code: stronger colleague for harder planning/review passes and
+      architecture-heavy multi-file refactors
+    - codex: stronger colleague for harder planning/review passes and
+      deterministic implementation-heavy work
     """
 
     tt = str(task_type or "task").strip().lower()
-    if tt in {"review", "consciousness"}:
+    if tt == "consciousness":
         return "ouroboros"
     if analysis_only:
+        return "ouroboros"
+    if tt == "review":
+        if architecture_heavy:
+            return "claude_code"
+        if deterministic_output_required or implementation_heavy:
+            return "codex"
         return "ouroboros"
     if architecture_heavy:
         return "claude_code"
@@ -77,9 +87,7 @@ def caller_can_schedule_external_executor(
         return bool(allow_consciousness)
     if tt == "evolution":
         return bool(allow_evolution)
-    if cc == "review":
-        return False
-    return cc in {"main_task_agent", "human_invoked", "task_agent", ""}
+    return cc in {"main_task_agent", "human_invoked", "task_agent", "review", ""}
 
 
 class ToolSchemaProvider(Protocol):

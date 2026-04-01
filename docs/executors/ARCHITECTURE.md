@@ -10,11 +10,23 @@ v1 adds executor-aware subtask routing with isolated execution and explicit patc
 
 Target outcome:
 - Main Ouroboros agent remains the only orchestrator.
-- External executors run only as subtask workers.
+- External executors act as stronger specialist colleagues when the task is beyond
+  what the main agent can solve comfortably on its own.
+- External executors run only as isolated subtask workers.
 - Each external run executes in isolated git worktree.
 - External run output is structured artifacts + schema-validated result.
 - Patch import is explicit (`apply_task_patch`), separate from run.
 - Existing review and commit gates stay authoritative.
+
+Primary intended use cases:
+- planning tasks
+- review tasks
+- implementation tasks
+
+Selection is an escalation decision, not a default. If the main agent can solve
+the problem directly without strain, it should do so. If it gets stuck, expects
+the task to exceed its comfortable complexity envelope, or wants a stronger pass,
+it should ask an external executor for help.
 
 ## Non-negotiable invariants
 
@@ -38,6 +50,8 @@ Target outcome:
 - Review gate: final acceptance and commit decision.
 
 External executors are opaque worker backends and must not be treated as drop-in `LLMClient` models.
+They are isolated helpers that the main agent consults when it needs a stronger
+planning, review, or implementation pass.
 
 ## Execution flow
 
@@ -114,4 +128,3 @@ Versioning:
 - External executor invocation from consciousness.
 - External executor invocation from evolution by default.
 - Codex cloud tasks integration.
-

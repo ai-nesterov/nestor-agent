@@ -17,9 +17,14 @@ launcher.py (PyWebView)       ← desktop window, immutable (bundle-only, not in
   ▼
 server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
   │
+  ├── nestor/                  ← server runtime modules extracted from server.py
+  │   ├── http.py             ← HTTP handlers, route assembly, static-file policy
+  │   ├── websocket.py        ← WebSocket client lifecycle + broadcast helpers
+  │   └── state.py            ← Shared runtime state, supervisor boot, slash commands
+  │
   ├── web/                     ← Web UI (SPA with ES modules in web/modules/)
   │
-  ├── supervisor/              ← Background thread inside server.py
+  ├── supervisor/              ← Background thread started via nestor/state.py
   │   ├── message_bus.py       ← Queue-based message bus (LocalChatBridge)
   │   ├── workers.py           ← Multiprocessing worker pool (fork/spawn by platform)
   │   ├── state.py             ← Persistent state (state.json) with file locking
@@ -36,7 +41,7 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
       ├── loop_llm_call.py     ← Single-round LLM call + usage accounting
       ├── loop_tool_execution.py ← Tool dispatch and tool-result handling
       ├── pricing.py           ← Model pricing, cost estimation, usage events
-      ├── llm.py               ← OpenRouter API client
+      ├── llm.py               ← Cloud/local LLM client routing and normalization
       ├── safety.py            ← Dual-layer LLM security supervisor
       ├── consciousness.py     ← Background thinking loop (with progress emission)
       ├── consolidator.py      ← Block-wise dialogue consolidation (dialogue_blocks.json)
@@ -70,11 +75,14 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
    - First-run wizard (PyWebView HTML page for API key entry)
    - **Graceful shutdown with orphan cleanup** (see Shutdown section below)
 
-2. **server.py** — self-editable inner server. Can be modified by the agent.
-   - Starlette app with HTTP API + WebSocket
-   - Runs supervisor in a background thread
-   - Supervisor manages worker pool, task queue, message routing
-   - Local model lifecycle endpoints extracted to `ouroboros/local_model_api.py`
+2. **server.py + nestor/** — self-editable inner server.
+   - `server.py` is now a thin entry point that wires Starlette lifespan, uvicorn,
+     and compatibility exports.
+   - `nestor/http.py` owns HTTP handlers and route assembly.
+   - `nestor/websocket.py` owns WebSocket client lifecycle and broadcasts.
+   - `nestor/state.py` owns shared runtime state, supervisor startup, slash commands,
+     panic/restart handling, and chat routing.
+   - Local model lifecycle endpoints remain in `ouroboros/local_model_api.py`.
 
 3. **telegram_bot.py** — standalone aiogram 3.x Telegram bot process (optional).
    - Uses aiogram polling (no webhook server needed)
@@ -89,7 +97,8 @@ server.py (Starlette+uvicorn) ← HTTP + WebSocket on localhost:8765
 ```
 ~/Ouroboros/
 ├── repo/              ← Agent's self-modifying git repository
-│   ├── server.py      ← The running server (copied from workspace)
+│   ├── server.py      ← Thin server entry point (copied from workspace)
+│   ├── nestor/        ← Extracted server runtime modules
 │   ├── ouroboros/      ← Agent core package
 │   │   └── local_model_api.py  ← Local model API endpoints (extracted from server.py)
 │   ├── supervisor/     ← Supervisor package
@@ -239,6 +248,8 @@ Navigation is a left sidebar with 8 pages.
 - **Stat cards**: Uptime, Workers (alive/total + progress bar), Budget (spent/limit + bar), Branch@SHA.
 - **Toggles**: Evolution Mode (on/off), Background Consciousness (on/off).
   Send `/evolve start|stop` and `/bg start|stop` via WebSocket command.
+  `/evolve start` now injects a direct-action directive into background consciousness
+  instead of auto-enqueueing a dedicated evolution task.
 - **Buttons**:
   - **Force Review** → sends `/review` command. Queues a deep code review task.
   - **Restart Agent** → sends `/restart` command. Graceful restart (save state, kill workers, exit 42).
@@ -247,20 +258,27 @@ Navigation is a left sidebar with 8 pages.
 
 ### 3.3 Settings
 
-- **API Keys**: OpenRouter (optional, required for cloud path), OpenAI (optional, for web search), Anthropic (optional), Local model (optional).
+- **Provider selector**: choose active cloud provider (`openrouter` or `minimax`).
+- **API Keys**: OpenRouter, MiniMax, OpenAI (web search), Anthropic, GitHub, Local model.
   Keys are displayed as masked values (e.g., `sk-or-v1...`).
   Only overwritten on save if user enters a new value (not containing `...`).
-- **Provider Base URLs**: OpenRouter base URL and optional local OpenAI-compatible base URL.
+- **Provider Base URLs**: OpenRouter base URL, MiniMax base URL, and optional local OpenAI-compatible base URL.
   Local base URL falls back to legacy `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` behavior when unset.
 - **Models**: Main, Code, Light, Fallback.
+- **External Executors**: global enable toggle, Claude/Codex enable toggles, auth modes,
+  daily caps, max parallelism, and review backend selector (`cloud|codex|claude_code|both`).
+  Conceptually these are isolated senior-colleague backends: the main agent uses them
+  for planning, review, and implementation when the task is beyond what it can handle
+  comfortably by itself in the current loop.
 - **Reasoning Effort**: Four separate dropdowns for task/chat, evolution, review, and consciousness.
   Backed by `OUROBOROS_EFFORT_TASK`, `OUROBOROS_EFFORT_EVOLUTION`, `OUROBOROS_EFFORT_REVIEW`,
   `OUROBOROS_EFFORT_CONSCIOUSNESS`. Loading falls back to legacy `OUROBOROS_INITIAL_REASONING_EFFORT`
   for task/chat when the new key is absent.
-- **Review Models**: Comma-separated OpenRouter model IDs for pre-commit review.
+- **Review Models**: Comma-separated cloud reviewer model IDs.
   Backed by `OUROBOROS_REVIEW_MODELS`.
 - **Review Enforcement**: `Advisory` or `Blocking` for pre-commit review behavior.
   Backed by `OUROBOROS_REVIEW_ENFORCEMENT`. Review always runs in both modes.
+- **Local lane routing**: explicit `USE_LOCAL_*` toggles plus per-lane local model IDs.
 - **Runtime**: Max Workers, Budget ($), Tool Timeout, Soft/Hard Timeout.
 - **GitHub**: Token + Repo (for remote sync).
 - **Save Settings** button → POST `/api/settings`. Applies to env immediately.
@@ -329,6 +347,7 @@ Navigation is a left sidebar with 8 pages.
 | GET | `/` | Serves `web/index.html` |
 | GET | `/api/health` | `{status, version, runtime_version, app_version}` |
 | GET | `/api/state` | Dashboard data: uptime, workers, budget, branch, etc. |
+| GET | `/api/executor/status` | External executor auth/quota status (Codex, Claude Code) |
 | GET | `/api/settings` | Current settings with masked API keys |
 | POST | `/api/settings` | Update settings (partial update, only provided keys) |
 | POST | `/api/command` | Send a slash command `{cmd: "/status"}` |
@@ -343,10 +362,10 @@ Navigation is a left sidebar with 8 pages.
 | GET | `/api/evolution-data` | Evolution metrics per git tag (LOC, prompt sizes, memory) |
 | GET | `/api/chat/history` | Merged chat + system summaries + progress messages (chronological, limit param) |
 | POST | `/api/local-model/test` | Local model sanity test (chat + tool calling) |
-| POST | `/api/telegram/webhook` | Telegram Bot API webhook (legacy): receives updates, routes to message_bus |
-| POST | `/api/telegram/process-message` | Internal API for telegram_bot.py: authenticated message processing |
+| POST | `/api/telegram/webhook` | Legacy webhook endpoint kept for compatibility |
+| POST | `/api/telegram/process-message` | Internal API for `telegram_bot.py` polling process |
 | WS | `/ws` | WebSocket: chat messages, commands, log streaming |
-| GET | `/static/*` | Static files from `web/` directory (NoCacheStaticFiles wrapper forces revalidation) |
+| GET | `/static/*` | Static files from `web/` with forced `Cache-Control: no-cache, must-revalidate` |
 
 ### WebSocket protocol
 
@@ -363,27 +382,27 @@ Navigation is a left sidebar with 8 pages.
 
 ## 5. Supervisor Loop
 
-Runs in a background thread inside `server.py:_run_supervisor()`.
+Runs in a background thread launched by `nestor/state.py:run_supervisor()`.
 
 Each iteration (0.5s sleep):
 1. `rotate_chat_log_if_needed()` — archive chat.jsonl if > 800KB
 2. `ensure_workers_healthy()` — respawn dead workers, detect crash storms
 3. Drain event queue (worker→supervisor events via multiprocessing.Queue)
 4. `enforce_task_timeouts()` — soft/hard timeout handling
-5. `enqueue_evolution_task_if_needed()` — auto-queue evolution if enabled
+5. `enqueue_evolution_task_if_needed()` — enforce evolution cooldown / circuit breaker and allow direct-action evolution mode
 6. `assign_tasks()` — match pending tasks to free workers
 7. `persist_queue_snapshot()` — save queue state for crash recovery
 8. Poll `LocalChatBridge` inbox for user messages
 9. Route messages: slash commands → supervisor handlers; text → agent
 
-### Slash command handling (server.py main loop)
+### Slash command handling (`nestor/state.py` main loop)
 
 | Command | Action |
 |---------|--------|
 | `/panic` | Kill workers (force), request restart exit |
 | `/restart` | Save state, safe_restart (git), kill workers, exit 42 |
 | `/review` | Queue a review task |
-| `/evolve on\|off` | Toggle evolution mode in state, prune evolution tasks if off |
+| `/evolve start\|stop` | Toggle evolution mode; `start` also injects a direct-action evolution directive into background consciousness |
 | `/bg start\|stop\|status` | Control background consciousness |
 | `/status` | Send status text with budget breakdown |
 | (anything else) | Route to agent via `handle_chat_direct()` |
@@ -432,6 +451,12 @@ Each iteration (0.5s sleep):
   blocking iterations. Quorum: at least 2 of 3 reviewers must succeed in
   blocking mode. Deterministic preflight catches VERSION/README mismatches
   before the expensive LLM call.
+- **Review executor routing** (v4.7.1+): `OUROBOROS_REVIEW_EXECUTOR` can send review
+  through cloud models, isolated Codex, isolated Claude Code, or both external executors.
+  External review runs never commit directly; they return artifacts into the main review gate.
+- **When to use external executors**: when the task exceeds the main agent's easy working envelope.
+  Typical escalation cases are deeper planning, harder review, or implementation work where
+  a stronger specialist pass is preferable to repeated local retries.
 - **`pull_from_remote`**: fast-forward only pull from origin
 - **`restore_to_head`**: discard uncommitted changes (review-exempt)
 - **`revert_commit`**: create a revert commit for a specific SHA (review-exempt)
@@ -447,8 +472,9 @@ Each iteration (0.5s sleep):
 - **`telegram_setup_webhook`**: Configure webhook URL with Telegram Bot API
 - **`telegram_get_webhook_info`**: Get current webhook status and statistics
 - **`telegram_get_me`**: Get bot information (username, ID)
-- **Integration flow**: Webhook endpoint (`/api/telegram/webhook`) receives updates → routes to message_bus as `telegram_message` tasks → agent processes → response sent via `telegram_send_message`
-- **Configuration**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_ENABLED`, `TELEGRAM_WEBHOOK_URL` in settings
+- **Runtime mode**: standalone aiogram polling process managed by launcher/server lifecycle
+- **Integration flow**: Telegram polling process → `/api/telegram/process-message` → message bus → agent → `telegram_send_message`
+- **Configuration**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_ENABLED`, `TELEGRAM_INTERNAL_SECRET` in settings
 
 ### Safety system (safety.py + registry.py)
 
@@ -457,7 +483,7 @@ Multi-layer security:
 2. **Deterministic whitelist** (safety.py): known-safe operations (read-only shell commands, repo writes already guarded by sandbox) skip LLM for speed.
 3. **LLM Layer 1 (fast)**: Light model checks remaining tool calls for SAFE/SUSPICIOUS/DANGEROUS.
 4. **LLM Layer 2 (deep)**: If flagged, heavy model re-evaluates with "are you sure?" nudge.
-5. **Post-execution revert**: After claude_code_edit, modifications to safety-critical files are automatically reverted.
+5. **Post-execution revert**: External edit paths must not leave persistent mutations on safety-critical files.
 - Safety LLM calls now emit standard `llm_usage` events, so safety costs and failures appear in the same audit/health pipeline as other model calls.
 `identity.md` is intentionally mutable (self-creation) and can be rewritten radically;
 the constitutional guard is that the file itself must remain non-deletable.
@@ -563,18 +589,37 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 |-----|---------|-------------|
 | OPENROUTER_API_KEY | "" | Optional cloud LLM API key (required only for OpenRouter mode) |
 | OPENROUTER_BASE_URL | https://openrouter.ai/api/v1 | Base URL for OpenRouter-compatible cloud routing |
+| MINIMAX_API_KEY | "" | Optional cloud LLM API key (required only for MiniMax mode) |
+| MINIMAX_BASE_URL | https://api.minimax.io/v1 | Base URL for MiniMax cloud routing |
+| MINIMAX_PLAN_TYPE | token_plan | MiniMax billing plan metadata for pricing/quota normalization |
+| MINIMAX_PLAN_TIER | "" | Optional MiniMax plan tier label |
+| MINIMAX_REQUESTS_5H_LIMIT | 0 | Optional MiniMax rolling 5h request cap (0 = disabled) |
+| MINIMAX_REQUESTS_WEEKLY_LIMIT | 0 | Optional MiniMax weekly request cap (0 = disabled) |
+| LLM_PROVIDER | openrouter | Active cloud provider: `openrouter` or `minimax` |
 | OPENAI_API_KEY | "" | Optional. For web_search tool |
 | ANTHROPIC_API_KEY | "" | Optional. For Claude Code CLI |
-| OUROBOROS_MODEL | anthropic/claude-opus-4.6 | Main reasoning model |
-| OUROBOROS_MODEL_CODE | anthropic/claude-opus-4.6 | Code editing model |
-| OUROBOROS_MODEL_LIGHT | anthropic/claude-sonnet-4.6 | Fast/cheap model (safety, consciousness) |
-| OUROBOROS_MODEL_FALLBACK | anthropic/claude-sonnet-4.6 | Fallback when primary fails |
+| OUROBOROS_MODEL | Qwen/Qwen3.5-27B | Main reasoning model |
+| OUROBOROS_MODEL_CODE | Qwen/Qwen3-Coder-Next | Code editing model |
+| OUROBOROS_MODEL_LIGHT | Qwen/Qwen3.5-27B | Fast/cheap model (safety, consciousness) |
+| OUROBOROS_MODEL_CONSOLIDATION | Openai/Gpt-oss-120b | Consolidation model |
+| OUROBOROS_MODEL_FALLBACK | Openai/Gpt-oss-120b | Fallback when primary fails |
 | CLAUDE_CODE_MODEL | opus | Anthropic model for Claude Code CLI (sonnet, opus, or full name) |
+| CODEX_MODEL | gpt-5.4 | Codex worker model |
+| EXTERNAL_EXECUTORS_ENABLED | false | Global switch for isolated external executors |
+| CLAUDE_CODE_ENABLED | false | Enable Claude Code worker pool |
+| CODEX_ENABLED | false | Enable Codex worker pool |
+| CLAUDE_CODE_AUTH_MODE | subscription_only | Claude Code auth policy |
+| CODEX_AUTH_MODE | subscription_only | Codex auth policy |
+| CLAUDE_CODE_DAILY_TASK_CAP | 5 | Daily Claude Code task budget |
+| CODEX_DAILY_TASK_CAP | 5 | Daily Codex task budget |
+| CLAUDE_CODE_MAX_PARALLEL | 1 | Max concurrent Claude Code runs |
+| CODEX_MAX_PARALLEL | 1 | Max concurrent Codex runs |
 | OUROBOROS_MAX_WORKERS | 5 | Worker process pool size |
 | TOTAL_BUDGET | 10.0 | Total budget in USD |
 | OUROBOROS_WEBSEARCH_MODEL | gpt-5.2 | OpenAI model for web_search tool |
 | OUROBOROS_REVIEW_MODELS | openai/gpt-5.4,google/gemini-3.1-pro-preview,anthropic/claude-opus-4.6 | Comma-separated OpenRouter model IDs for pre-commit review (min 2 for quorum) |
-| OUROBOROS_REVIEW_ENFORCEMENT | blocking | Pre-commit review enforcement: `advisory` or `blocking` |
+| OUROBOROS_REVIEW_ENFORCEMENT | advisory | Pre-commit review enforcement: `advisory` or `blocking` |
+| OUROBOROS_REVIEW_EXECUTOR | cloud | Review backend: `cloud`, `codex`, `claude_code`, `both` |
 | OUROBOROS_EFFORT_TASK | medium | Reasoning effort for task/chat: none, low, medium, high |
 | OUROBOROS_EFFORT_EVOLUTION | high | Reasoning effort for evolution tasks |
 | OUROBOROS_EFFORT_REVIEW | medium | Reasoning effort for review tasks |
@@ -585,7 +630,7 @@ Settings file: `~/Ouroboros/data/settings.json`. File-locked for concurrent acce
 | LOCAL_MODEL_FILENAME | "" | GGUF filename within repo |
 | LOCAL_MODEL_BASE_URL | "" | Optional local OpenAI-compatible base URL (empty = legacy LOCAL_MODEL_PORT fallback) |
 | LOCAL_MODEL_API_KEY | "" | Optional bearer token for local OpenAI-compatible endpoints |
-| LOCAL_MODEL_CONTEXT_LENGTH | 16384 | Context window for local model |
+| LOCAL_MODEL_CONTEXT_LENGTH | 32768 | Context window for local model |
 | LOCAL_MODEL_N_GPU_LAYERS | 0 | GPU layers (-1=all, 0=CPU/mmap) |
 | USE_LOCAL_MAIN | false | Route main model to local server |
 | USE_LOCAL_CODE | false | Route code model to local server |
@@ -623,7 +668,7 @@ processes. No zombies, no workers lingering in background.**
 ```
 1. _shutdown_event.set()           ← signal lifecycle loop to exit
 2. stop_agent()
-   a. SIGTERM → server.py          ← server runs its lifespan shutdown:
+   a. SIGTERM → server.py          ← server/nestor runtime runs lifespan shutdown:
       │                                kill_workers(force=True) → SIGTERM+SIGKILL all workers
       │                                then server exits cleanly
    b. wait 10s for exit
@@ -641,7 +686,7 @@ guarantees no orphans even if the server hangs or workers resist SIGTERM.
 
 **Panic is a full emergency stop. Not a restart — a complete shutdown.**
 
-The panic sequence (in `server.py:_execute_panic_stop()`):
+The panic sequence (in `nestor/state.py:execute_panic_stop()`):
 
 ```
 1. consciousness.stop()             ← stop background consciousness thread
@@ -674,7 +719,7 @@ On next manual launch:
 
 ### 9.3 Subprocess Process Group Management
 
-All subprocesses spawned by agent tools (`run_shell`, `claude_code_edit`)
+All subprocesses spawned by agent tools (`run_shell` and external executor runners)
 use `start_new_session=True` (via `_tracked_subprocess_run()` in
 `ouroboros/tools/shell.py`). This creates a separate process group for each
 subprocess and all its children.

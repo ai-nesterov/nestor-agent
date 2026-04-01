@@ -579,7 +579,7 @@ def get_tools() -> List[ToolEntry]:
         }, _run_shell, is_code_tool=True),
         ToolEntry("claude_code_edit", {
             "name": "claude_code_edit",
-            "description": "Delegate code edits to Claude Code CLI. Preferred for multi-file changes and refactors. Follow with repo_commit.",
+            "description": "Delegate a code-edit implementation pass to Claude Code CLI inside an isolated executor flow. Use as an escalation path when direct local editing is no longer comfortable, especially for architecture-heavy multi-file refactors or other hard implementation work. Follow with repo_commit if you keep the result.",
             "parameters": {"type": "object", "properties": {
                 "prompt": {"type": "string"},
                 "cwd": {"type": "string", "default": ""},

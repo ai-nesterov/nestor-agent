@@ -443,7 +443,7 @@ def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry("request_restart", {
             "name": "request_restart",
-            "description": "Ask supervisor to restart runtime (after successful push).",
+            "description": "Ask supervisor to restart runtime. Use after a successful commit when restart is actually needed.",
             "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]},
         }, _request_restart),
         ToolEntry("promote_to_stable", {
@@ -453,7 +453,7 @@ def get_tools() -> List[ToolEntry]:
         }, _promote_to_stable),
         ToolEntry("schedule_task", {
             "name": "schedule_task",
-            "description": "Schedule a background task. Returns task_id for later retrieval. Use executor='ouroboros' by default; claude_code for architecture-heavy refactors; codex for deterministic implementation-heavy subtasks.",
+            "description": "Schedule a background task and return task_id for later retrieval. Use executor='ouroboros' for straightforward work you can handle comfortably yourself. Use external executors as escalation paths for planning, review, or implementation when the task is becoming too hard, you are getting stuck, or a stronger specialist pass is warranted.",
             "parameters": {"type": "object", "properties": {
                 "description": {"type": "string", "description": "Task description — be specific about scope and expected deliverable"},
                 "context": {"type": "string", "description": "Optional context from parent task: background info, constraints, style guide, etc."},
@@ -527,7 +527,7 @@ def get_tools() -> List[ToolEntry]:
         }, _update_identity),
         ToolEntry("toggle_evolution", {
             "name": "toggle_evolution",
-            "description": "Enable or disable evolution mode. When enabled, Ouroboros runs continuous self-improvement cycles.",
+            "description": "Enable or disable evolution mode. When enabled, Ouroboros enters direct self-improvement mode: it uses consciousness/directives to execute concrete improvements instead of blindly auto-spawning evolution subtasks.",
             "parameters": {"type": "object", "properties": {
                 "enabled": {"type": "boolean", "description": "true to enable, false to disable"},
             }, "required": ["enabled"]},
@@ -552,14 +552,14 @@ def get_tools() -> List[ToolEntry]:
         }, _switch_model),
         ToolEntry("get_task_result", {
             "name": "get_task_result",
-            "description": "Read the result of a completed subtask. Use after schedule_task to collect results.",
+            "description": "Read the current or completed result of a scheduled subtask. Use after schedule_task to collect output from internal or external workers.",
             "parameters": {"type": "object", "required": ["task_id"], "properties": {
                 "task_id": {"type": "string", "description": "Task ID returned by schedule_task"},
             }},
         }, _get_task_result),
         ToolEntry("wait_for_task", {
             "name": "wait_for_task",
-            "description": "Check if a subtask has completed. Returns result if done, or 'still running' message. Call repeatedly to poll.",
+            "description": "Poll a scheduled subtask and return its result if ready, otherwise a running-status message. Prefer this for occasional coordination, not tight retry loops.",
             "parameters": {"type": "object", "required": ["task_id"], "properties": {
                 "task_id": {"type": "string", "description": "Task ID to check"},
             }},

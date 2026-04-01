@@ -895,14 +895,15 @@ def get_tools() -> List[ToolEntry]:
                 "skip_tests": {"type": "boolean", "default": False, "description": "Skip pre-commit tests."},
                 "also_stage": {"type": "array", "items": {"type": "string"}, "description": "Additional files to stage"},
                 "review_executor": {"type": "string", "enum": ["cloud", "codex", "claude_code", "both"], "default": "cloud",
-                    "description": "Review backend: cloud multi-model review, Codex CLI, Claude Code CLI, or both local CLIs."},
+                    "description": "Review backend: cloud reviewers, Codex, Claude Code, or both external specialist executors."},
             }, "required": ["path", "content", "commit_message"]},
         }, _repo_write_commit, is_code_tool=True),
         ToolEntry("repo_commit", {
             "name": "repo_commit",
             "description": (
-                "Commit already-changed files. Includes unified pre-commit multi-model review "
-                "before commit, with configurable Advisory/Blocking enforcement."
+                "Commit already-changed files. Includes unified pre-commit review "
+                "before commit, with configurable Advisory/Blocking enforcement and a selectable "
+                "review backend (cloud, Codex, Claude Code, or both external specialist executors)."
             ),
             "parameters": {"type": "object", "properties": {
                 "commit_message": {"type": "string"},
@@ -911,7 +912,7 @@ def get_tools() -> List[ToolEntry]:
                 "review_rebuttal": {"type": "string", "default": "",
                     "description": "If previous commit was blocked by reviewers and you disagree, include counter-argument."},
                 "review_executor": {"type": "string", "enum": ["cloud", "codex", "claude_code", "both"], "default": "cloud",
-                    "description": "Review backend: cloud multi-model review, Codex CLI, Claude Code CLI, or both local CLIs."},
+                    "description": "Review backend: cloud reviewers, Codex, Claude Code, or both external specialist executors."},
             }, "required": ["commit_message"]},
         }, _repo_commit_push, is_code_tool=True),
         ToolEntry("git_status", {

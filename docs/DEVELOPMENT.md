@@ -95,11 +95,23 @@ Derived from P5 (Minimalism): entire codebase fits in one context window.
 ## Review & Commit Protocol
 
 Every commit through `repo_commit` or `repo_write_commit` passes a **unified
-pre-commit review** — three models review the staged diff against
-`docs/CHECKLISTS.md` before commit. Review enforcement is configurable:
-`Blocking` preserves the current hard gate, while `Advisory` still runs the
+pre-commit review** against `docs/CHECKLISTS.md` before commit. The review
+backend is configurable via `OUROBOROS_REVIEW_EXECUTOR`:
+
+- `cloud` — 3 cloud reviewers through the shared LLM client
+- `codex` — isolated Codex review worker
+- `claude_code` — isolated Claude Code review worker
+- `both` — run both external reviewers
+
+Review enforcement is separately configurable:
+`Blocking` preserves the hard gate, while `Advisory` still runs the
 same review but downgrades findings and review-phase failures to warnings.
 See `ouroboros/tools/review.py` for implementation.
+
+External executors in general should be treated as more experienced colleagues,
+not as default replacements for the main agent. Use them for planning, review,
+or implementation when the task has crossed the complexity threshold where the
+main agent is no longer handling it comfortably in a direct local pass.
 
 Preferred workflow for multi-file changes: `repo_write` all files first, then
 `repo_commit` to stage, review, and commit everything in one diff.

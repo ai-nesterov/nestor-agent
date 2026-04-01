@@ -123,7 +123,11 @@ Output: `dist\Ouroboros-windows-x64.zip`
 ```text
 Ouroboros
 ├── launcher.py             — Immutable process manager (PyWebView desktop window)
-├── server.py               — Starlette + uvicorn HTTP/WebSocket server
+├── server.py               — Thin Starlette + uvicorn entry point
+├── nestor/                 — Server runtime split from server.py:
+│   ├── http.py             — HTTP handlers and route assembly
+│   ├── websocket.py        — WebSocket client management
+│   └── state.py            — Shared runtime state, supervisor lifecycle, slash commands
 ├── web/                    — Web UI (HTML/JS/CSS)
 ├── ouroboros/              — Agent core:
 │   ├── config.py           — Shared configuration (SSOT)
@@ -133,6 +137,7 @@ Ouroboros
 │   ├── agent_task_pipeline.py  — Task execution pipeline orchestration
 │   ├── context.py          — LLM context builder
 │   ├── context_compaction.py — Context trimming and summarization helpers
+│   ├── llm.py              — Cloud/local LLM client routing
 │   ├── loop.py             — High-level LLM tool loop
 │   ├── loop_llm_call.py    — Single-round LLM call + usage accounting
 │   ├── loop_tool_execution.py — Tool dispatch and tool-result handling
@@ -146,8 +151,10 @@ Ouroboros
 │   ├── reflection.py       — Execution reflection and pattern capture
 │   ├── consciousness.py    — Background thinking loop
 │   ├── owner_inject.py     — Per-task creator message mailbox
+│   ├── outcome.py          — Canonical execution facts and outcome classification
 │   ├── safety.py           — Dual-layer LLM security supervisor
 │   ├── server_runtime.py   — Server startup and WebSocket liveness helpers
+│   ├── structured_output.py — Shared structured-output parsing helpers
 │   ├── tool_policy.py      — Tool access policy and gating
 │   ├── utils.py            — Shared utilities
 │   ├── world_profiler.py   — System profile generator
@@ -176,6 +183,7 @@ Created on first launch:
 | Key | Required | Where to get it |
 |-----|----------|-----------------|
 | OpenRouter API Key | Optional (required for cloud models) | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| MiniMax API Key | Optional (required when `LLM_PROVIDER=minimax`) | MiniMax console |
 | OpenAI API Key | No | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables web search tool |
 | Anthropic API Key | No | [console.anthropic.com](https://console.anthropic.com/settings/keys) — enables Claude Code CLI |
 | Local Model API Key | No | Optional bearer token for OpenAI-compatible local endpoints |
@@ -187,19 +195,33 @@ All keys are configured through the **Settings** page in the UI or during the fi
 
 | Setting | Default | Notes |
 |---------|---------|-------|
+| `LLM_PROVIDER` | `openrouter` | Active cloud provider: `openrouter` or `minimax` |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL for OpenRouter-compatible cloud routing |
+| `MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Base URL for MiniMax cloud routing |
 | `LOCAL_MODEL_BASE_URL` | *(empty)* | If empty, falls back to legacy local URL: `http://127.0.0.1:${LOCAL_MODEL_PORT}/v1` |
 | `LOCAL_MODEL_API_KEY` | *(empty)* | If set, local requests send `Authorization: Bearer <LOCAL_MODEL_API_KEY>` |
+
+### Review And Executors
+
+Settings also expose:
+
+- external executors are isolated specialist colleagues for planning, review, and implementation tasks when the problem is beyond what the main agent can solve comfortably on its own
+- `OUROBOROS_REVIEW_EXECUTOR`: `cloud`, `codex`, `claude_code`, or `both`
+- `EXTERNAL_EXECUTORS_ENABLED`: global switch for isolated Codex / Claude Code workers
+- daily caps, auth modes, and parallelism for `codex` / `claude_code`
+- per-lane local routing toggles: `USE_LOCAL_MAIN`, `USE_LOCAL_CODE`, `USE_LOCAL_LIGHT`, `USE_LOCAL_FALLBACK`
 
 ### Default Models
 
 | Slot | Default | Purpose |
 |------|---------|---------|
-| Main | `anthropic/claude-opus-4.6` | Primary reasoning |
-| Code | `anthropic/claude-opus-4.6` | Code editing |
-| Light | `anthropic/claude-sonnet-4.6` | Safety checks, consciousness, fast tasks |
-| Fallback | `anthropic/claude-sonnet-4.6` | When primary model fails |
+| Main | `Qwen/Qwen3.5-27B` | Primary reasoning |
+| Code | `Qwen/Qwen3-Coder-Next` | Code editing |
+| Light | `Qwen/Qwen3.5-27B` | Safety checks, consciousness, fast tasks |
+| Consolidation | `Openai/Gpt-oss-120b` | Dialogue/scratchpad consolidation |
+| Fallback | `Openai/Gpt-oss-120b` | When primary model fails |
 | Claude Code CLI | `opus` | Anthropic model for Claude Code CLI tools |
+| Codex CLI | `gpt-5.4` | External Codex worker model |
 | Web Search | `gpt-5.2` | OpenAI Responses API for web search |
 
 Task/chat reasoning defaults to `medium`.
@@ -217,7 +239,7 @@ Available in the chat interface:
 | `/panic` | Emergency stop. Kills ALL processes, closes the application. |
 | `/restart` | Soft restart. Saves state, kills workers, re-launches. |
 | `/status` | Shows active workers, task queue, and budget breakdown. |
-| `/evolve` | Toggle autonomous evolution mode (on/off). |
+| `/evolve start|stop` | Toggle autonomous evolution mode. `start` now signals direct action through background consciousness instead of auto-spawning an evolution task. |
 | `/review` | Queue a deep review task (code, understanding, identity). |
 | `/bg` | Toggle background consciousness loop (start/stop/status). |
 
