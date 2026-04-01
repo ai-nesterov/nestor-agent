@@ -18,6 +18,13 @@ def test_classify_outcome_from_facts_detects_commit():
     assert outcome["productive"] is True
 
 
+def test_all_outcome_classes_include_verifier_states():
+    from ouroboros.outcome import ALL_OUTCOME_CLASSES
+
+    assert "accepted" in ALL_OUTCOME_CLASSES
+    assert "rejected" in ALL_OUTCOME_CLASSES
+
+
 def test_apply_task_type_outcome_policy_fails_report_only_evolution():
     from ouroboros.outcome import apply_task_type_outcome_policy
 
@@ -138,6 +145,18 @@ def test_constraints_do_not_force_blocked_external_from_narrative_text():
     assert "blocked_external" not in constraints["allowed_outcomes"]
 
 
+def test_classify_evolution_verify_outcome_accepts_explicit_marker():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_evolution_verify_outcome(
+        {"result": "Verification complete.\nVERIFIER_DECISION: ACCEPTED\nREASON: tests passed."},
+        {"total_rounds": 2},
+    )
+
+    assert outcome == "accepted"
+    assert reason == "verifier_accepted_candidate"
+
+
 def test_classify_outcome_from_facts_blocks_only_on_hard_provider_facts():
     from ouroboros.outcome import classify_outcome_from_facts, default_execution_facts
 
@@ -229,6 +248,78 @@ def test_handle_task_done_prefers_canonical_outcome(tmp_path):
     payload = load_task_result(tmp_path, "canon001")
     assert payload["outcome_class"] == "executed_work"
     assert payload["outcome_source"] == "rule"
+
+
+def test_handle_evolution_task_done_queues_verifier_for_committed_candidate(tmp_path, monkeypatch):
+    from ouroboros.task_results import STATUS_COMPLETED, load_task_result, write_task_result
+    from supervisor import events as ev_module
+
+    queued = []
+    snapshots = []
+
+    def _fake_enqueue_task(task, front=False):
+        queued.append((dict(task), bool(front)))
+        return dict(task)
+
+    monkeypatch.setattr("supervisor.queue.enqueue_task", _fake_enqueue_task)
+    monkeypatch.setattr("supervisor.queue.persist_queue_snapshot", lambda reason="": snapshots.append(reason))
+
+    write_task_result(
+        tmp_path,
+        "evo100",
+        STATUS_COMPLETED,
+        task_type="evolution",
+        description="Reduce tool errors",
+        objective_id="obj100",
+        objective_source="task_results",
+        objective_subsystem="tooling",
+        objective_hypothesis="Validation should reduce errors.",
+        acceptance_checks=["Create a repo_commit"],
+        outcome_class="committed",
+        outcome_reason="repo_commit_executed",
+        outcome_source="rule",
+        result="Committed the fix.",
+        execution_facts={"repo_commit_calls": 1},
+        trace_summary="## Tool trace (1 calls, 0 errors)\n1. repo_commit(commit_message='fix')",
+    )
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        RUNNING = {}
+        WORKERS = {}
+        bridge = _Bridge()
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def persist_queue_snapshot(self, reason=""):
+            snapshots.append(reason)
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_task_done(
+        {"type": "task_done", "task_id": "evo100", "task_type": "evolution", "cost_usd": 0.0, "total_rounds": 2},
+        _Ctx(),
+    )
+
+    assert queued
+    queued_task, front = queued[0]
+    assert queued_task["task_kind"] == "evolution_verify"
+    assert queued_task["parent_task_id"] == "evo100"
+    assert front is True
+
+    payload = load_task_result(tmp_path, "evo100")
+    assert payload["verifier_task_id"]
 
 
 def test_handle_task_done_revalidates_legacy_blocked_external(tmp_path):

@@ -65,6 +65,9 @@ _BLOCKED_PATTERNS = (
     "soft limited",
     "hard blocked",
 )
+_VERIFIER_ACCEPT_PATTERNS = ("verifier_decision: accepted",)
+_VERIFIER_REJECT_PATTERNS = ("verifier_decision: rejected",)
+_VERIFIER_OWNER_PATTERNS = ("verifier_decision: needs_owner_input",)
 _PRODUCTIVE_TASK_OUTCOMES = {"executed_work", "scheduled_followup", "committed"}
 _NONPRODUCTIVE_TASK_OUTCOMES = {"report_only", "needs_owner_input", "blocked_external"}
 
@@ -403,6 +406,56 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     task_type = str(evt.get("task_type") or "")
     wid = evt.get("worker_id")
     result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
+    task_kind = str((result_payload or {}).get("task_kind") or "").strip().lower()
+
+    if task_kind == "evolution_verify":
+        outcome, reason = _classify_evolution_verify_outcome(result_payload, evt)
+        write_task_result(
+            ctx.DRIVE_ROOT,
+            str(task_id or ""),
+            STATUS_COMPLETED,
+            outcome_class=outcome,
+            outcome_reason=reason,
+            outcome_source="rule",
+            cost_usd=float(evt.get("cost_usd", 0) or 0.0),
+            total_rounds=int(evt.get("total_rounds") or 0),
+            ts=evt.get("ts", ""),
+        )
+        st = ctx.load_state()
+        st["evolution_last_outcome"] = outcome
+        st["evolution_last_outcome_at"] = evt.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        st["evolution_blocked_reason"] = reason
+        if outcome == "accepted":
+            st["evolution_consecutive_failures"] = 0
+            st["evolution_waiting_for_owner"] = False
+        elif outcome == "needs_owner_input":
+            st["evolution_waiting_for_owner"] = True
+        else:
+            st["evolution_consecutive_failures"] = int(st.get("evolution_consecutive_failures") or 0) + 1
+            st["evolution_waiting_for_owner"] = False
+        ctx.save_state(st)
+        try:
+            append_evolution_archive_entry(
+                ctx.DRIVE_ROOT,
+                {
+                    "task_id": str(task_id or ""),
+                    "task_kind": "evolution_verify",
+                    "candidate_task_id": (result_payload or {}).get("candidate_task_id"),
+                    "objective_id": (result_payload or {}).get("objective_id"),
+                    "objective_description": (result_payload or {}).get("description"),
+                    "outcome_class": outcome,
+                    "outcome_reason": reason,
+                    "outcome_source": "rule",
+                    "cost_usd": float(evt.get("cost_usd") or 0.0),
+                    "total_rounds": int(evt.get("total_rounds") or 0),
+                    "tests_run": (result_payload or {}).get("tests_run") or [],
+                    "tests_passed": (result_payload or {}).get("tests_passed"),
+                    "ts_unix": time.time(),
+                },
+            )
+        except Exception:
+            log.warning("Failed to append evolution verifier archive entry for task %s", task_id, exc_info=True)
+        return
 
     # Track evolution task success/failure for circuit breaker
     if task_type == "evolution":
@@ -482,6 +535,22 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
             st["evolution_consecutive_failures"] = 0
             st["evolution_waiting_for_owner"] = False
             ctx.save_state(st)
+            if outcome == "committed":
+                owner_chat_id = st.get("owner_chat_id")
+                if owner_chat_id and isinstance(result_payload, dict):
+                    verifier_task_id = _enqueue_evolution_verifier(
+                        ctx=ctx,
+                        owner_chat_id=int(owner_chat_id),
+                        candidate_task_id=str(task_id or ""),
+                        candidate_payload=result_payload,
+                    )
+                    if verifier_task_id:
+                        write_task_result(
+                            ctx.DRIVE_ROOT,
+                            str(task_id or ""),
+                            STATUS_COMPLETED,
+                            verifier_task_id=verifier_task_id,
+                        )
         elif outcome == "needs_owner_input":
             st["evolution_waiting_for_owner"] = True
             ctx.save_state(st)
@@ -771,6 +840,84 @@ def _classify_task_outcome(
         return "failed", "task_never_started"
 
     return "failed", "empty_result"
+
+
+def _classify_evolution_verify_outcome(
+    result_payload: Optional[Dict[str, Any]],
+    evt: Dict[str, Any],
+) -> tuple[str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    result_text = str(payload.get("result") or "").strip().lower()
+    rounds = int(evt.get("total_rounds") or 0)
+
+    if any(pattern in result_text for pattern in _VERIFIER_ACCEPT_PATTERNS):
+        return "accepted", "verifier_accepted_candidate"
+    if any(pattern in result_text for pattern in _VERIFIER_REJECT_PATTERNS):
+        return "rejected", "verifier_rejected_candidate"
+    if any(pattern in result_text for pattern in _VERIFIER_OWNER_PATTERNS):
+        return "needs_owner_input", "verifier_requested_owner_direction"
+    if rounds == 0:
+        return "failed", "task_never_started"
+    if result_text:
+        return "rejected", "verifier_missing_explicit_decision"
+    return "failed", "empty_result"
+
+
+def _enqueue_evolution_verifier(
+    *,
+    ctx: Any,
+    owner_chat_id: int,
+    candidate_task_id: str,
+    candidate_payload: Dict[str, Any],
+) -> Optional[str]:
+    from supervisor import queue as queue_module
+
+    verifier_task_id = uuid.uuid4().hex[:8]
+    objective = {
+        "description": candidate_payload.get("description"),
+        "hypothesis": candidate_payload.get("objective_hypothesis"),
+        "acceptance_checks": candidate_payload.get("acceptance_checks") or [],
+        "subsystem": candidate_payload.get("objective_subsystem"),
+    }
+    verifier_task = {
+        "id": verifier_task_id,
+        "type": "task",
+        "task_kind": "evolution_verify",
+        "chat_id": int(owner_chat_id),
+        "text": queue_module.build_evolution_verify_task_text(candidate_task_id, objective=objective),
+        "description": f"Verify evolution candidate {candidate_task_id}",
+        "context": str(candidate_payload.get("result") or ""),
+        "priority": 0,
+        "caller_class": "main_task_agent",
+        "parent_task_id": candidate_task_id,
+        "candidate_task_id": candidate_task_id,
+        "objective_id": candidate_payload.get("objective_id"),
+        "objective_source": candidate_payload.get("objective_source"),
+        "objective_subsystem": candidate_payload.get("objective_subsystem"),
+        "objective_hypothesis": candidate_payload.get("objective_hypothesis"),
+        "acceptance_checks": candidate_payload.get("acceptance_checks") or [],
+    }
+    queue_module.enqueue_task(verifier_task, front=True)
+    queue_module.persist_queue_snapshot(reason="evolution_verifier_enqueued")
+    write_task_result(
+        ctx.DRIVE_ROOT,
+        verifier_task_id,
+        STATUS_SCHEDULED,
+        parent_task_id=candidate_task_id,
+        description=verifier_task["description"],
+        context=verifier_task["context"],
+        task_type="task",
+        task_kind="evolution_verify",
+        caller_class="main_task_agent",
+        candidate_task_id=candidate_task_id,
+        objective_id=candidate_payload.get("objective_id"),
+        objective_source=candidate_payload.get("objective_source"),
+        objective_subsystem=candidate_payload.get("objective_subsystem"),
+        objective_hypothesis=candidate_payload.get("objective_hypothesis"),
+        acceptance_checks=candidate_payload.get("acceptance_checks") or [],
+        result=f"Verifier queued for evolution candidate {candidate_task_id}.",
+    )
+    return verifier_task_id
 
 
 def _parse_result_ts(raw: Any) -> Optional[float]:

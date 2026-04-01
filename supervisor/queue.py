@@ -549,6 +549,35 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
     )
 
 
+def build_evolution_verify_task_text(
+    candidate_task_id: str,
+    objective: Dict[str, Any] | None = None,
+) -> str:
+    objective = objective if isinstance(objective, dict) else {}
+    description = str(objective.get("description") or "Verify the latest evolution candidate.").strip()
+    hypothesis = str(objective.get("hypothesis") or "").strip()
+    acceptance_checks = [str(item).strip() for item in (objective.get("acceptance_checks") or []) if str(item).strip()]
+    acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks) or "- The candidate should satisfy its stated acceptance checks.\n"
+    return (
+        "EVOLUTION VERIFIER\n\n"
+        f"CANDIDATE TASK ID: {candidate_task_id}\n\n"
+        "OBJECTIVE:\n"
+        f"- {description}\n"
+        + (f"\nHYPOTHESIS:\n- {hypothesis}\n" if hypothesis else "\n")
+        + "VERIFICATION CHECKS:\n"
+        + acceptance_lines
+        + "\nINSTRUCTIONS:\n"
+        + "1. Inspect the candidate task result and repository state.\n"
+        + "2. Run the smallest relevant verification you can justify (tests, git diff, targeted inspection).\n"
+        + "3. Do not modify repository files in the verifier task.\n"
+        + "4. End your final answer with exactly one verifier verdict line:\n"
+        + "   VERIFIER_DECISION: ACCEPTED\n"
+        + "   or VERIFIER_DECISION: REJECTED\n"
+        + "   or VERIFIER_DECISION: NEEDS_OWNER_INPUT\n"
+        + "5. Add a short REASON line immediately after the verdict.\n"
+    )
+
+
 def build_review_task_text(reason: str) -> str:
     """Build review task text.
 
