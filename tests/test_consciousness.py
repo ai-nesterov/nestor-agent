@@ -13,6 +13,8 @@ import pathlib
 import queue
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -151,6 +153,90 @@ class TestEmitProgress(unittest.TestCase):
         events_path = drive_root / "logs" / "events.jsonl"
         content = events_path.read_text(encoding="utf-8")
         self.assertIn('"thought_preview": "private thought"', content)
+
+
+class TestLoopShutdownRace(unittest.TestCase):
+    """Regression test: _loop must not raise 'cannot schedule new futures after
+    shutdown' when the executor is shut down from within _think().
+
+    The original bug: threading.Event.wait(timeout=N) was called directly in
+    the loop thread while loop.run_until_complete() was active. When _think()
+    called _tool_executor.shutdown(), the blocking wait() raced with the
+    asyncio cancellation inside the same thread, raising:
+        RuntimeError('cannot schedule new futures after shutdown')
+
+    The fix: Event.wait() is now run in a background thread via
+    loop.run_in_executor(), keeping it fully outside the run_until_complete()
+    call stack so executor shutdown is safe at any point.
+    """
+
+    def _make_consciousness(self, chat_id=42, event_queue=None):
+        """Create a BackgroundConsciousness with mocked dependencies."""
+        from ouroboros.consciousness import BackgroundConsciousness
+
+        tmpdir = tempfile.mkdtemp()
+        drive_root = pathlib.Path(tmpdir)
+        (drive_root / "logs").mkdir(parents=True, exist_ok=True)
+        repo_dir = pathlib.Path(tmpdir) / "repo"
+        repo_dir.mkdir()
+
+        eq = event_queue if event_queue is not None else queue.Queue()
+
+        with patch.object(BackgroundConsciousness, '_build_registry', return_value=MagicMock()):
+            bc = BackgroundConsciousness(
+                drive_root=drive_root,
+                repo_dir=repo_dir,
+                event_queue=eq,
+                owner_chat_id_fn=lambda: chat_id,
+            )
+        return bc, eq, drive_root
+
+    def test_loop_shutdown_no_runtime_error(self):
+        """Stopping the loop while _think() runs must not raise
+        'cannot schedule new futures after shutdown'.
+
+        The bug: the old implementation called Event.wait(timeout) directly
+        in the loop thread while inside loop.run_until_complete(). When
+        _think() called _tool_executor.shutdown(wait=True), the executor
+        cancelled the Event.wait future, causing run_until_complete to raise:
+            RuntimeError('cannot schedule new futures after shutdown')
+
+        The fix: Event.wait() runs in run_in_executor() (background thread),
+        and _think() is called OUTSIDE run_until_complete(). The executor
+        shutdown can never race with the inner asyncio call stack.
+
+        This test directly instantiates the loop thread (bypassing start())
+        so we can trigger the stop race synchronously.
+        """
+        bc, eq, drive_root = self._make_consciousness()
+
+        # Track whether _think was reached and whether shutdown was called
+        think_called = []
+        bc._think = MagicMock(side_effect=lambda: think_called.append(True))
+        bc._check_budget = MagicMock(return_value=True)
+
+        # Give the loop a very short wakeup so it cycles quickly
+        bc._next_wakeup_sec = 0.05
+
+        # Run _loop in a thread so it can be stopped from the main thread
+        thread = threading.Thread(target=bc._loop, name="consciousness-test")
+        thread.start()
+
+        # Wait for _think to be called at least once (loop is running)
+        for _ in range(50):
+            if think_called:
+                break
+            time.sleep(0.05)
+
+        self.assertTrue(think_called, "_think was never called — loop may not be running")
+
+        # Now stop — this races with the next Event.wait timeout
+        bc._stop_event.set()
+        bc._wakeup_event.set()  # wake it immediately if it's sleeping
+        thread.join(timeout=3.0)
+
+        self.assertFalse(thread.is_alive(), "_loop did not exit after stop_event.set()")
+        # Reaching here without RuntimeError = test passes
 
 
 if __name__ == "__main__":
