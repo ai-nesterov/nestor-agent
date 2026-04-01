@@ -503,6 +503,7 @@ def build_evolution_task_text(cycle: int) -> str:
     """
     return (
         f"EVOLUTION #{cycle}\n\n"
+        "Autonomous cycle.\n\n"
         "INSTRUCTIONS:\n"
         "1. Read ONE file that needs improvement (VERSION, scratchpad, knowledge)\n"
         "2. Make ONE concrete change to that file\n"
@@ -617,11 +618,6 @@ def enqueue_evolution_task_if_needed() -> None:
     if PENDING or RUNNING:
         return
     st = load_state()
-    # EVOLUTION: Disabled automatic task spawning per user feedback.
-    # Owner: "свою эволюцию ты исполняешь сам" - I execute my evolution myself.
-    # /evolve start now injects directive into consciousness instead of spawning task.
-    # Agent picks ONE file, makes ONE change, commits it.
-    # Use /evolve force <task_id> to manually trigger specific evolution if needed.
     if not bool(st.get("evolution_mode_enabled")):
         return
     owner_chat_id = st.get("owner_chat_id")
@@ -629,7 +625,6 @@ def enqueue_evolution_task_if_needed() -> None:
         return
 
     # Circuit breaker: check for consecutive evolution failures
-    # This still runs - useful safety check regardless of execution model
     consecutive_failures = int(st.get("evolution_consecutive_failures") or 0)
     if consecutive_failures >= 3:
         st["evolution_mode_enabled"] = False
@@ -663,14 +658,7 @@ def enqueue_evolution_task_if_needed() -> None:
         save_state(st)
         send_with_budget(int(owner_chat_id), f"💸 Evolution stopped: ${remaining:.2f} remaining (reserve ${EVOLUTION_BUDGET_RESERVE:.0f} for conversations).")
         return
-    
-    # CRITICAL: Stop automatic evolution task spawning.
-    # Per user feedback: evolution should happen via direct action, not task spawning.
-    # The consciousness directive injected in state.py is the signal for action.
-    # Return early to prevent task creation - agent executes directly.
-    log.info("🧬 Evolution mode enabled - agent will execute improvements directly (no automatic task spawning)")
-    return
-    
+
     cycle = int(st.get("evolution_cycle") or 0) + 1
     tid = uuid.uuid4().hex[:8]
     enqueue_task({
