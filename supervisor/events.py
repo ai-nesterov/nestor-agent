@@ -68,6 +68,7 @@ _BLOCKED_PATTERNS = (
 _VERIFIER_ACCEPT_PATTERNS = ("verifier_decision: accepted",)
 _VERIFIER_REJECT_PATTERNS = ("verifier_decision: rejected",)
 _VERIFIER_OWNER_PATTERNS = ("verifier_decision: needs_owner_input",)
+_PLANNER_REQUIRED_MARKERS = ("plan_summary:", "target_files:", "validation:")
 _EVOLUTION_REVIEW_FILES = (
     "supervisor/",
     "ouroboros/outcome.py",
@@ -415,11 +416,25 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     wid = evt.get("worker_id")
     result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
     task_kind = str((result_payload or {}).get("task_kind") or "").strip().lower()
+    handled_special_task = False
 
     if task_kind == "evolution_plan":
+        handled_special_task = True
+        outcome, reason = _classify_evolution_plan_outcome(result_payload, evt)
+        write_task_result(
+            ctx.DRIVE_ROOT,
+            str(task_id or ""),
+            STATUS_COMPLETED,
+            outcome_class=outcome,
+            outcome_reason=reason,
+            outcome_source="rule",
+            cost_usd=float(evt.get("cost_usd", 0) or 0.0),
+            total_rounds=int(evt.get("total_rounds") or 0),
+            ts=evt.get("ts", ""),
+        )
         st = ctx.load_state()
         owner_chat_id = st.get("owner_chat_id")
-        if owner_chat_id and isinstance(result_payload, dict):
+        if outcome == "scheduled_followup" and owner_chat_id and isinstance(result_payload, dict):
             cycle = int((result_payload or {}).get("evolution_cycle") or st.get("evolution_cycle") or 0)
             implementer_task_id = _enqueue_evolution_implementer_from_plan(
                 ctx=ctx,
@@ -435,9 +450,9 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     STATUS_COMPLETED,
                     implementer_task_id=implementer_task_id,
                 )
-        return
 
     if task_kind == "evolution_verify":
+        handled_special_task = True
         outcome, reason = _classify_evolution_verify_outcome(result_payload, evt)
         candidate_task_id = str((result_payload or {}).get("candidate_task_id") or "").strip()
         candidate_payload = load_task_result(ctx.DRIVE_ROOT, candidate_task_id) if candidate_task_id else None
@@ -507,10 +522,9 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     STATUS_COMPLETED,
                     review_task_id=review_task_id,
                 )
-        return
 
     # Track evolution task success/failure for circuit breaker
-    if task_type == "evolution":
+    if not handled_special_task and task_type == "evolution":
         st = ctx.load_state()
         canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
         if canonical_outcome:
@@ -638,7 +652,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                 "source": outcome_source,
             },
         )
-    elif task_id:
+    elif not handled_special_task and task_id:
         canonical_outcome, canonical_reason, canonical_source = _extract_canonical_outcome(result_payload)
         if canonical_outcome:
             outcome, blocked_reason, outcome_source = _revalidate_canonical_outcome(
@@ -913,6 +927,26 @@ def _classify_evolution_verify_outcome(
         return "failed", "task_never_started"
     if result_text:
         return "rejected", "verifier_missing_explicit_decision"
+    return "failed", "empty_result"
+
+
+def _classify_evolution_plan_outcome(
+    result_payload: Optional[Dict[str, Any]],
+    evt: Dict[str, Any],
+) -> tuple[str, str]:
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    result_text = str(payload.get("result") or "").strip()
+    lowered = result_text.lower()
+    rounds = int(evt.get("total_rounds") or 0)
+
+    if rounds == 0:
+        return "failed", "task_never_started"
+    if any(pattern in lowered for pattern in _OWNER_INPUT_PATTERNS):
+        return "needs_owner_input", "planner_requested_owner_direction"
+    if result_text and all(marker in lowered for marker in _PLANNER_REQUIRED_MARKERS):
+        return "scheduled_followup", "planner_produced_structured_plan"
+    if result_text:
+        return "failed", "planner_missing_structured_sections"
     return "failed", "empty_result"
 
 

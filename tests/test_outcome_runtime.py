@@ -157,6 +157,18 @@ def test_classify_evolution_verify_outcome_accepts_explicit_marker():
     assert reason == "verifier_accepted_candidate"
 
 
+def test_classify_evolution_plan_outcome_requires_structured_sections():
+    from supervisor import events as ev_module
+
+    outcome, reason = ev_module._classify_evolution_plan_outcome(
+        {"result": "PLAN_SUMMARY:\nDo it.\nTARGET_FILES:\na.py\nVALIDATION:\npytest tests/test_a.py"},
+        {"total_rounds": 1},
+    )
+
+    assert outcome == "scheduled_followup"
+    assert reason == "planner_produced_structured_plan"
+
+
 def test_classify_outcome_from_facts_blocks_only_on_hard_provider_facts():
     from ouroboros.outcome import classify_outcome_from_facts, default_execution_facts
 
@@ -390,3 +402,131 @@ def test_handle_task_done_revalidates_legacy_blocked_external(tmp_path):
 
     payload = load_task_result(tmp_path, "legacy001")
     assert payload["outcome_class"] != "blocked_external"
+
+
+def test_handle_planner_task_done_requires_structured_success_before_enqueue(tmp_path, monkeypatch):
+    from ouroboros.task_results import STATUS_RUNNING, load_task_result, write_task_result
+    from supervisor import events as ev_module
+
+    queued = []
+    snapshots = []
+
+    def _fake_enqueue_task(task, front=False):
+        queued.append((dict(task), bool(front)))
+        return dict(task)
+
+    monkeypatch.setattr("supervisor.queue.enqueue_task", _fake_enqueue_task)
+    monkeypatch.setattr("supervisor.queue.persist_queue_snapshot", lambda reason="": snapshots.append(reason))
+
+    write_task_result(
+        tmp_path,
+        "plan001",
+        STATUS_RUNNING,
+        task_type="task",
+        task_kind="evolution_plan",
+        evolution_cycle=7,
+        description="Plan a change",
+        objective_hypothesis="This would help.",
+        result="Free-form notes without required headings.",
+    )
+
+    worker = SimpleNamespace(busy_task_id="plan001")
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        RUNNING = {"plan001": {"task": {"id": "plan001", "task_kind": "evolution_plan"}, "worker_id": 2}}
+        WORKERS = {2: worker}
+        bridge = _Bridge()
+
+        def load_state(self):
+            return {"owner_chat_id": 1, "evolution_cycle": 7}
+
+        def save_state(self, st):
+            return None
+
+        def persist_queue_snapshot(self, reason=""):
+            snapshots.append(reason)
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    ev_module._handle_task_done(
+        {"type": "task_done", "task_id": "plan001", "task_type": "task", "worker_id": 2, "total_rounds": 1},
+        _Ctx(),
+    )
+
+    payload = load_task_result(tmp_path, "plan001")
+    assert payload["outcome_class"] == "failed"
+    assert payload["outcome_reason"] == "planner_missing_structured_sections"
+    assert not queued
+    assert "plan001" not in _Ctx.RUNNING
+    assert worker.busy_task_id is None
+    assert "task_done" in snapshots
+
+
+def test_handle_verifier_task_done_releases_running_worker(tmp_path):
+    from ouroboros.task_results import STATUS_RUNNING, load_task_result, write_task_result
+    from supervisor import events as ev_module
+
+    write_task_result(
+        tmp_path,
+        "cand001",
+        STATUS_RUNNING,
+        task_type="evolution",
+        result="Committed candidate.",
+        changed_files=["README.md"],
+    )
+    write_task_result(
+        tmp_path,
+        "ver001",
+        STATUS_RUNNING,
+        task_type="task",
+        task_kind="evolution_verify",
+        candidate_task_id="cand001",
+        result="VERIFIER_DECISION: ACCEPTED\nREASON: looks good.",
+    )
+
+    worker = SimpleNamespace(busy_task_id="ver001")
+
+    class _Bridge:
+        def push_log(self, payload):
+            return None
+
+    class _Ctx:
+        DRIVE_ROOT = tmp_path
+        RUNNING = {"ver001": {"task": {"id": "ver001", "task_kind": "evolution_verify"}, "worker_id": 3}}
+        WORKERS = {3: worker}
+        bridge = _Bridge()
+
+        def load_state(self):
+            return {"owner_chat_id": 1}
+
+        def save_state(self, st):
+            return None
+
+        def persist_queue_snapshot(self, reason=""):
+            return None
+
+        def append_jsonl(self, path, obj):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+        def queue_review_task(self, reason, force=False):
+            return None
+
+    ev_module._handle_task_done(
+        {"type": "task_done", "task_id": "ver001", "task_type": "task", "worker_id": 3, "total_rounds": 1},
+        _Ctx(),
+    )
+
+    payload = load_task_result(tmp_path, "ver001")
+    assert payload["outcome_class"] == "accepted"
+    assert "ver001" not in _Ctx.RUNNING
+    assert worker.busy_task_id is None

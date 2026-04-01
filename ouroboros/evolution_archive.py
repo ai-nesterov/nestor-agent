@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import time
 from collections import Counter
 from typing import Any, Dict, List
 
@@ -20,7 +21,7 @@ def append_evolution_archive_entry(drive_root: Any, entry: Dict[str, Any]) -> Di
     path = evolution_archive_path(drive_root)
     payload = dict(entry or {})
     payload.setdefault("ts", utc_now_iso())
-    payload.setdefault("ts_unix", path.stat().st_mtime if path.exists() else 0.0)
+    payload.setdefault("ts_unix", time.time())
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     return payload
