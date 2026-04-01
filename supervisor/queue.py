@@ -629,6 +629,7 @@ def enqueue_evolution_task_if_needed() -> None:
         return
 
     # Circuit breaker: check for consecutive evolution failures
+    # This still runs - useful safety check regardless of execution model
     consecutive_failures = int(st.get("evolution_consecutive_failures") or 0)
     if consecutive_failures >= 3:
         st["evolution_mode_enabled"] = False
@@ -662,6 +663,14 @@ def enqueue_evolution_task_if_needed() -> None:
         save_state(st)
         send_with_budget(int(owner_chat_id), f"💸 Evolution stopped: ${remaining:.2f} remaining (reserve ${EVOLUTION_BUDGET_RESERVE:.0f} for conversations).")
         return
+    
+    # CRITICAL: Stop automatic evolution task spawning.
+    # Per user feedback: evolution should happen via direct action, not task spawning.
+    # The consciousness directive injected in state.py is the signal for action.
+    # Return early to prevent task creation - agent executes directly.
+    log.info("🧬 Evolution mode enabled - agent will execute improvements directly (no automatic task spawning)")
+    return
+    
     cycle = int(st.get("evolution_cycle") or 0) + 1
     tid = uuid.uuid4().hex[:8]
     enqueue_task({
