@@ -378,17 +378,20 @@ async def api_git_promote(request: Request) -> JSONResponse:
 
 async def api_evolution_data(request: Request) -> JSONResponse:
     from ouroboros.utils import collect_evolution_metrics
+    from ouroboros.evolution_archive import summarize_evolution_archive
 
     now = time.time()
     cache = state.get_evolution_cache()
     if cache.get("ts") and now - cache["ts"] < 60:
-        return JSONResponse({"points": cache["points"]})
+        return JSONResponse({"points": cache["points"], "summary": cache.get("summary") or {}})
 
     data_dir = os.environ.get("OUROBOROS_DATA_DIR", os.path.expanduser("~/Ouroboros/data"))
     data_points = await collect_evolution_metrics(str(state.REPO_DIR), data_dir=data_dir)
+    summary = summarize_evolution_archive(data_dir)
     cache["ts"] = now
     cache["points"] = data_points
-    return JSONResponse({"points": data_points})
+    cache["summary"] = summary
+    return JSONResponse({"points": data_points, "summary": summary})
 
 
 async def index_page(request: Request) -> FileResponse:

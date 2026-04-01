@@ -41,6 +41,17 @@ def _collect_commit_artifact_metadata(env: Any) -> Dict[str, Any]:
             text=True,
             check=True,
         ).stdout.strip()
+        task_id = os.environ.get("OUROBOROS_CURRENT_TASK_ID", "").strip()
+        candidate_branch = ""
+        if task_id:
+            candidate_branch = f"evolution-candidate/{task_id}"
+            subprocess.run(
+                ["git", "branch", "-f", candidate_branch, candidate_sha],
+                cwd=env.repo_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
         parent_sha = subprocess.run(
             ["git", "rev-parse", "HEAD^"],
             cwd=env.repo_dir,
@@ -59,6 +70,7 @@ def _collect_commit_artifact_metadata(env: Any) -> Dict[str, Any]:
         return {
             "candidate_sha": candidate_sha,
             "parent_sha": parent_sha,
+            "candidate_branch": candidate_branch,
             "changed_files": changed_files,
         }
     except Exception:
@@ -261,6 +273,7 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             description=task.get("description"),
             context=task.get("context"),
             agent_role=task.get("agent_role"),
+            evolution_cycle=task.get("evolution_cycle"),
             objective_id=task.get("objective_id"),
             objective_source=task.get("objective_source"),
             objective_subsystem=task.get("objective_subsystem"),
@@ -278,6 +291,7 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             total_rounds=int(usage.get("rounds") or 0),
             candidate_sha=commit_artifacts.get("candidate_sha"),
             parent_sha=commit_artifacts.get("parent_sha"),
+            candidate_branch=commit_artifacts.get("candidate_branch"),
             changed_files=commit_artifacts.get("changed_files") or [],
             ts=utc_now_iso(),
         )

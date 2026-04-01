@@ -80,7 +80,8 @@ def test_enqueue_evolution_resumes_after_new_owner_message(monkeypatch):
     q_module.enqueue_evolution_task_if_needed()
 
     assert len(pending) == 1
-    assert pending[0]["type"] == "evolution"
+    assert pending[0]["type"] == "task"
+    assert pending[0]["task_kind"] == "evolution_plan"
     assert any(s.get("evolution_waiting_for_owner") is False for s in saved)
     assert sent and "Evolution #5" in sent[0][1]
 

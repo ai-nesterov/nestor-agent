@@ -416,6 +416,27 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
     result_payload = load_task_result(ctx.DRIVE_ROOT, str(task_id or ""))
     task_kind = str((result_payload or {}).get("task_kind") or "").strip().lower()
 
+    if task_kind == "evolution_plan":
+        st = ctx.load_state()
+        owner_chat_id = st.get("owner_chat_id")
+        if owner_chat_id and isinstance(result_payload, dict):
+            cycle = int((result_payload or {}).get("evolution_cycle") or st.get("evolution_cycle") or 0)
+            implementer_task_id = _enqueue_evolution_implementer_from_plan(
+                ctx=ctx,
+                owner_chat_id=int(owner_chat_id),
+                cycle=cycle,
+                planner_task_id=str(task_id or ""),
+                planner_payload=result_payload,
+            )
+            if implementer_task_id:
+                write_task_result(
+                    ctx.DRIVE_ROOT,
+                    str(task_id or ""),
+                    STATUS_COMPLETED,
+                    implementer_task_id=implementer_task_id,
+                )
+        return
+
     if task_kind == "evolution_verify":
         outcome, reason = _classify_evolution_verify_outcome(result_payload, evt)
         candidate_task_id = str((result_payload or {}).get("candidate_task_id") or "").strip()
@@ -556,6 +577,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     "tests_passed": archive_payload.get("tests_passed"),
                     "candidate_sha": archive_payload.get("candidate_sha"),
                     "parent_sha": archive_payload.get("parent_sha"),
+                    "candidate_branch": archive_payload.get("candidate_branch"),
                     "ts_unix": time.time(),
                 },
             )
@@ -951,6 +973,71 @@ def _enqueue_evolution_verifier(
         result=f"Verifier queued for evolution candidate {candidate_task_id}.",
     )
     return verifier_task_id
+
+
+def _enqueue_evolution_implementer_from_plan(
+    *,
+    ctx: Any,
+    owner_chat_id: int,
+    cycle: int,
+    planner_task_id: str,
+    planner_payload: Dict[str, Any],
+) -> Optional[str]:
+    from supervisor import queue as queue_module
+
+    objective = {
+        "description": planner_payload.get("description"),
+        "hypothesis": planner_payload.get("objective_hypothesis"),
+        "acceptance_checks": planner_payload.get("acceptance_checks") or [],
+        "subsystem": planner_payload.get("objective_subsystem"),
+    }
+    implementer_task_id = uuid.uuid4().hex[:8]
+    planner_result = str(planner_payload.get("result") or "").strip()
+    implementer_context = "\n\n".join(
+        part for part in [
+            str(planner_payload.get("objective_hypothesis") or "").strip(),
+            planner_result,
+        ] if part
+    )
+    task = {
+        "id": implementer_task_id,
+        "type": "evolution",
+        "chat_id": int(owner_chat_id),
+        "text": queue_module.build_evolution_task_text(cycle, objective=objective),
+        "description": str(planner_payload.get("description") or ""),
+        "context": implementer_context,
+        "agent_role": "evolution_implementer",
+        "task_kind": "evolution_implement",
+        "parent_task_id": planner_task_id,
+        "evolution_cycle": cycle,
+        "objective_id": planner_payload.get("objective_id"),
+        "objective_source": planner_payload.get("objective_source"),
+        "objective_subsystem": planner_payload.get("objective_subsystem"),
+        "objective_hypothesis": planner_payload.get("objective_hypothesis"),
+        "acceptance_checks": planner_payload.get("acceptance_checks") or [],
+    }
+    queue_module.enqueue_task(task, front=True)
+    queue_module.persist_queue_snapshot(reason="evolution_implementer_enqueued")
+    write_task_result(
+        ctx.DRIVE_ROOT,
+        implementer_task_id,
+        STATUS_SCHEDULED,
+        parent_task_id=planner_task_id,
+        description=task["description"],
+        context=implementer_context,
+        task_type="evolution",
+        task_kind="evolution_implement",
+        caller_class="main_task_agent",
+        agent_role="evolution_implementer",
+        evolution_cycle=cycle,
+        objective_id=planner_payload.get("objective_id"),
+        objective_source=planner_payload.get("objective_source"),
+        objective_subsystem=planner_payload.get("objective_subsystem"),
+        objective_hypothesis=planner_payload.get("objective_hypothesis"),
+        acceptance_checks=planner_payload.get("acceptance_checks") or [],
+        result=f"Evolution implementer queued from plan task {planner_task_id}.",
+    )
+    return implementer_task_id
 
 
 def _should_queue_review_for_evolution(

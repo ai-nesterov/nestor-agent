@@ -164,6 +164,8 @@ class OuroborosAgent:
         drive_logs = self.env.drive_path("logs")
         sanitized_task = sanitize_task_for_event(task, drive_logs)
         append_jsonl(drive_logs / "events.jsonl", {"ts": utc_now_iso(), "type": "task_received", "task": sanitized_task})
+        if task.get("id"):
+            os.environ["OUROBOROS_CURRENT_TASK_ID"] = str(task.get("id"))
         try:
             write_task_result(
                 self.env.drive_root,
@@ -173,6 +175,7 @@ class OuroborosAgent:
                 description=task.get("description"),
                 context=task.get("context"),
                 agent_role=task.get("agent_role"),
+                evolution_cycle=task.get("evolution_cycle"),
                 objective_id=task.get("objective_id"),
                 objective_source=task.get("objective_source"),
                 objective_subsystem=task.get("objective_subsystem"),

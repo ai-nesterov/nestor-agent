@@ -551,6 +551,39 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
     )
 
 
+def build_evolution_plan_task_text(
+    cycle: int,
+    objective: Dict[str, Any] | None = None,
+) -> str:
+    objective = objective if isinstance(objective, dict) else {}
+    description = str(objective.get("description") or "Plan the next concrete evolution step.").strip()
+    hypothesis = str(objective.get("hypothesis") or "").strip()
+    subsystem = str(objective.get("subsystem") or "runtime").strip()
+    acceptance_checks = [str(item).strip() for item in (objective.get("acceptance_checks") or []) if str(item).strip()]
+    acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks) or "- Produce a concrete implementable plan.\n"
+    return (
+        f"EVOLUTION PLAN #{cycle}\n\n"
+        "ROLE:\n"
+        "- evolution_planner\n\n"
+        "OBJECTIVE:\n"
+        f"- {description}\n\n"
+        + (f"HYPOTHESIS:\n- {hypothesis}\n\n" if hypothesis else "")
+        + "TARGET SUBSYSTEM:\n"
+        f"- {subsystem}\n\n"
+        "ACCEPTANCE:\n"
+        f"{acceptance_lines}\n"
+        "INSTRUCTIONS:\n"
+        "1. Produce a short plan for one concrete repository mutation.\n"
+        "2. Name likely target files and the minimal intended change.\n"
+        "3. Include a validation idea.\n"
+        "4. End with these headings exactly:\n"
+        "PLAN_SUMMARY:\n"
+        "TARGET_FILES:\n"
+        "VALIDATION:\n"
+        "5. Do not modify files in this planning step.\n"
+    )
+
+
 def build_evolution_verify_task_text(
     candidate_task_id: str,
     objective: Dict[str, Any] | None = None,
@@ -622,6 +655,18 @@ def queue_review_task(reason: str, force: bool = False) -> Optional[str]:
     persist_queue_snapshot(reason="review_enqueued")
     send_with_budget(int(owner_chat_id), f"🔎 Review queued: {tid} ({reason})")
     return tid
+
+
+def queue_has_task_kind(task_kind: str) -> bool:
+    """Check if a task of given kind exists in PENDING or RUNNING."""
+    tk = str(task_kind or "")
+    if any(str(t.get("task_kind") or "") == tk for t in PENDING):
+        return True
+    for meta in RUNNING.values():
+        task = meta.get("task") if isinstance(meta, dict) else None
+        if isinstance(task, dict) and str(task.get("task_kind") or "") == tk:
+            return True
+    return False
 
 
 def _get_evolution_cooldown(outcome: str) -> int:
@@ -717,12 +762,15 @@ def enqueue_evolution_task_if_needed() -> None:
     tid = uuid.uuid4().hex[:8]
     objective = select_next_objective(DRIVE_ROOT, state=st)
     enqueue_task({
-        "id": tid, "type": "evolution",
+        "id": tid,
+        "type": "task",
+        "task_kind": "evolution_plan",
         "chat_id": int(owner_chat_id),
-        "text": build_evolution_task_text(cycle, objective=objective),
+        "text": build_evolution_plan_task_text(cycle, objective=objective),
         "description": str(objective.get("description") or ""),
         "context": str(objective.get("hypothesis") or ""),
-        "agent_role": "evolution_implementer",
+        "agent_role": "evolution_planner",
+        "evolution_cycle": cycle,
         "objective_id": str(objective.get("id") or ""),
         "objective_source": str(objective.get("source") or ""),
         "objective_subsystem": str(objective.get("subsystem") or ""),
