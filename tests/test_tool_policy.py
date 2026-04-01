@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 
 import ouroboros.loop as loop_mod
+import ouroboros.tools.registry as registry_mod
 from ouroboros.tool_policy import CORE_TOOL_NAMES, initial_tool_schemas, list_non_core_tools
 from ouroboros.tools.registry import ToolRegistry
 
@@ -38,3 +39,18 @@ def test_loop_bootstraps_from_tool_policy():
     source = inspect.getsource(loop_mod)
     assert "initial_tool_schemas(tools)" in source
     assert "schemas(core_only=True)" not in source
+
+
+def test_registry_core_tool_names_match_policy():
+    assert registry_mod.CORE_TOOL_NAMES == CORE_TOOL_NAMES
+
+
+def test_registry_core_only_view_matches_policy():
+    registry = _build_registry()
+    expected = {
+        schema["function"]["name"]
+        for schema in registry.schemas()
+        if schema["function"]["name"] in CORE_TOOL_NAMES
+    }
+    actual = {schema["function"]["name"] for schema in registry.schemas(core_only=True)}
+    assert actual == expected | {"list_available_tools", "enable_tools"}

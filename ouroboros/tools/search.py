@@ -46,7 +46,8 @@ def _estimate_openai_cost(model: str, input_tokens: int, output_tokens: int) -> 
 def _clean_html_text(raw: str) -> str:
     text = re.sub(r"<[^>]+>", " ", raw or "")
     text = html.unescape(text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+([.,!?;:])", r"\1", text)
 
 
 def _normalize_duckduckgo_href(href: str) -> str:

@@ -70,13 +70,17 @@ def _request_restart(ctx: ToolContext, reason: str) -> str:
     except Exception:
         log.debug("Failed to read VERSION file or git ref for restart verification", exc_info=True)
         pass
-    ctx.pending_events.append({"type": "restart_request", "reason": reason, "ts": utc_now_iso()})
+    evt = {"type": "restart_request", "reason": reason, "ts": utc_now_iso()}
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     ctx.last_push_succeeded = False
     return f"Restart requested: {reason}"
 
 
 def _promote_to_stable(ctx: ToolContext, reason: str) -> str:
-    ctx.pending_events.append({"type": "promote_to_stable", "reason": reason, "ts": utc_now_iso()})
+    evt = {"type": "promote_to_stable", "reason": reason, "ts": utc_now_iso()}
+    if not _emit_control_event(ctx, evt):
+        ctx.pending_events.append(evt)
     return f"Promote to stable requested: {reason}"
 
 

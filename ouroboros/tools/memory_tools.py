@@ -17,6 +17,7 @@ from ouroboros.utils import utc_now_iso
 log = logging.getLogger(__name__)
 
 REGISTRY_PATH = "memory/registry.md"
+_VALID_SOURCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,98}[A-Za-z0-9]$|^[A-Za-z0-9]$")
 
 
 def _registry_file(ctx: ToolContext) -> Path:
@@ -48,6 +49,8 @@ def _memory_update_registry(
     source_id = source_id.strip()
     if "/" in source_id or "\\" in source_id or ".." in source_id:
         return "⚠️ Invalid characters in source_id."
+    if not _VALID_SOURCE_ID.match(source_id):
+        return "⚠️ Invalid source_id. Use letters, numbers, dot, underscore, colon, or hyphen."
 
     path = _registry_file(ctx)
     path.parent.mkdir(parents=True, exist_ok=True)

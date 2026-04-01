@@ -15,6 +15,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from ouroboros.tool_policy import CORE_TOOL_NAMES as TASK_START_CORE_TOOL_NAMES
 from ouroboros.utils import safe_relpath
 
 log = logging.getLogger(__name__)
@@ -178,21 +179,7 @@ class ToolEntry:
     timeout_sec: int = 360
 
 
-CORE_TOOL_NAMES = {
-    "repo_read", "repo_list", "repo_write", "repo_write_commit", "repo_commit",
-    "data_read", "data_list", "data_write",
-    "run_shell", "claude_code_edit",
-    "git_status", "git_diff",
-    "pull_from_remote", "restore_to_head", "revert_commit",
-    "schedule_task", "wait_for_task", "get_task_result", "resume_deferred_tasks",
-    "update_scratchpad", "update_identity",
-    "chat_history", "web_search",
-    "send_user_message", "switch_model",
-    "request_restart", "promote_to_stable",
-    "apply_task_patch", "discard_task_patch", "validate_executor_result",
-    "knowledge_read", "knowledge_write", "knowledge_list",
-    "browse_page", "browser_action", "analyze_screenshot",
-}
+CORE_TOOL_NAMES = frozenset(TASK_START_CORE_TOOL_NAMES)
 
 
 class ToolRegistry:
@@ -402,6 +389,7 @@ class ToolRegistry:
                 name=entry.name,
                 schema=entry.schema,
                 handler=handler,
+                is_code_tool=entry.is_code_tool,
                 timeout_sec=entry.timeout_sec,
             )
 

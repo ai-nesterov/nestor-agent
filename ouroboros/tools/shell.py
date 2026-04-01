@@ -190,8 +190,15 @@ def _run_shell(ctx: ToolContext, cmd, cwd: str = "") -> str:
     work_dir = ctx.repo_dir
     if cwd and cwd.strip() not in ("", ".", "./"):
         candidate = (ctx.repo_dir / cwd).resolve()
-        if candidate.exists() and candidate.is_dir():
-            work_dir = candidate
+        if not candidate.exists():
+            return f"⚠️ SHELL_CWD_ERROR: cwd does not exist: {cwd}"
+        if not candidate.is_dir():
+            return f"⚠️ SHELL_CWD_ERROR: cwd is not a directory: {cwd}"
+        try:
+            candidate.relative_to(ctx.repo_dir.resolve())
+        except ValueError:
+            return f"⚠️ SHELL_CWD_ERROR: cwd escapes repo_dir boundary: {cwd}"
+        work_dir = candidate
 
     try:
         res = _tracked_subprocess_run(

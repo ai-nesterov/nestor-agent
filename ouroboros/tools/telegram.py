@@ -59,7 +59,7 @@ def _telegram_api_request(method: str, data: Optional[dict] = None) -> Optional[
         return {"error": str(e)}
 
 
-def telegram_send_message(chat_id: str, text: str) -> str:
+def telegram_send_message(chat_id: str, text: str, parse_mode: str = "") -> str:
     """
     Send a text message to a Telegram chat.
     
@@ -81,11 +81,17 @@ def telegram_send_message(chat_id: str, text: str) -> str:
     if len(text) > 4096:
         text = text[:4093] + "..."
     
-    result = _telegram_api_request("sendMessage", {
+    if parse_mode not in ("", "Markdown", "MarkdownV2", "HTML"):
+        return "Failed to send message: unsupported parse_mode"
+
+    payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
-    })
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+
+    result = _telegram_api_request("sendMessage", payload)
     
     if result and result.get("ok"):
         return f"Message sent successfully to chat {chat_id}"
@@ -207,13 +213,17 @@ def get_tools() -> List[ToolEntry]:
                         },
                         "text": {
                             "type": "string",
-                            "description": "Message text to send (max 4096 characters, Markdown supported)"
+                            "description": "Message text to send (max 4096 characters)"
+                        },
+                        "parse_mode": {
+                            "type": "string",
+                            "description": "Optional Telegram parse mode: Markdown, MarkdownV2, or HTML. Leave empty for plain text."
                         }
                     },
                     "required": ["chat_id", "text"]
                 }
             },
-            handler=lambda ctx, chat_id, text: telegram_send_message(chat_id, text),
+            handler=lambda ctx, chat_id, text, parse_mode="": telegram_send_message(chat_id, text, parse_mode=parse_mode),
             is_code_tool=False,
             timeout_sec=60
         ),

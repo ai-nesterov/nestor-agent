@@ -213,7 +213,12 @@ def _create_issue(ctx: ToolContext, title: str, body: str = "", labels: str = ""
             if match:
                 issue_num = int(match.group(1))
                 label_args = ["issue", "edit", str(issue_num), f"--add-label={labels}"]
-                _gh_cmd(label_args, ctx)
+                label_raw = _gh_cmd(label_args, ctx)
+                if label_raw.startswith("⚠️"):
+                    return (
+                        f"⚠️ Issue created but failed to add labels: {raw}\n"
+                        f"{label_raw}"
+                    )
 
     if raw.startswith("⚠️"):
         return raw

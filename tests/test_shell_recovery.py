@@ -66,6 +66,22 @@ def test_run_shell_allows_shell_expansion_via_sh_c(tmp_path, monkeypatch):
     assert "exit_code=0" in result
 
 
+def test_run_shell_rejects_missing_cwd(tmp_path):
+    ctx = SimpleNamespace(repo_dir=tmp_path)
+    result = _run_shell(ctx, ["pwd"], cwd="missing-subdir")
+    assert "SHELL_CWD_ERROR" in result
+    assert "missing-subdir" in result
+
+
+def test_run_shell_rejects_cwd_outside_repo(tmp_path):
+    ctx = SimpleNamespace(repo_dir=tmp_path)
+    outside = tmp_path.parent / "outside"
+    outside.mkdir(exist_ok=True)
+    result = _run_shell(ctx, ["pwd"], cwd="../outside")
+    assert "SHELL_CWD_ERROR" in result
+    assert "escapes repo_dir boundary" in result
+
+
 def test_should_retry_claude_first_run_on_zero_token_invalid_key():
     stdout = """
 {"type":"result","subtype":"success","is_error":true,"duration_ms":588,"duration_api_ms":0,

@@ -169,6 +169,12 @@ def test_frozen_registry_includes_memory_tools(monkeypatch):
     assert "memory_update_registry" in available
 
 
+def test_override_handler_preserves_code_tool_flag(registry):
+    assert "run_shell" in registry.CODE_TOOLS
+    registry.override_handler("run_shell", lambda ctx, **kwargs: "ok")
+    assert "run_shell" in registry.CODE_TOOLS
+
+
 # ── Utilities ────────────────────────────────────────────────────
 
 def test_safe_relpath_normal():
