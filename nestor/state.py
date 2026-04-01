@@ -465,6 +465,13 @@ def run_supervisor(settings: dict, broadcast_ws_sync: Callable[[dict], None]) ->
                         st2["evolution_consecutive_failures"] = 0
                         st2["evolution_waiting_for_owner"] = False
                         st2["evolution_blocked_reason"] = ""
+                        # CRITICAL: Inject directive for ME to act directly, not spawn task
+                        consciousness.inject_observation(
+                            "🧬 DIRECTIVE: Execute ONE concrete improvement NOW. "
+                            "Pick a specific file, make ONE change, commit it. "
+                            "If multi-file - delegate to codex/claude_code. "
+                            "DO NOT spawn evolution task - BE the evolution."
+                        )
                     save_state(st2)
                     if not turn_on:
                         PENDING[:] = [t for t in PENDING if str(t.get("type")) != "evolution"]

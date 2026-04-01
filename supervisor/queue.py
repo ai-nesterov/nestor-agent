@@ -617,6 +617,11 @@ def enqueue_evolution_task_if_needed() -> None:
     if PENDING or RUNNING:
         return
     st = load_state()
+    # EVOLUTION: Disabled automatic task spawning per user feedback.
+    # Owner: "свою эволюцию ты исполняешь сам" - I execute my evolution myself.
+    # /evolve start now injects directive into consciousness instead of spawning task.
+    # Agent picks ONE file, makes ONE change, commits it.
+    # Use /evolve force <task_id> to manually trigger specific evolution if needed.
     if not bool(st.get("evolution_mode_enabled")):
         return
     owner_chat_id = st.get("owner_chat_id")
