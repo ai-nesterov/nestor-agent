@@ -18,6 +18,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
@@ -155,6 +157,7 @@ class TestEmitProgress(unittest.TestCase):
         self.assertIn('"thought_preview": "private thought"', content)
 
 
+@pytest.mark.slow
 class TestLoopShutdownRace(unittest.TestCase):
     """Regression test: _loop must not raise 'cannot schedule new futures after
     shutdown' when the executor is shut down from within _think().

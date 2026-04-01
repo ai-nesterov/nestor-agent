@@ -1,5 +1,11 @@
 """Behavioral tests for Phase 7: modern commit pipeline, operational resilience.
 
+.. note:: Tests in this file are integration-heavy (subprocess, git operations,
+   network stubs). They are marked @pytest.mark.slow and excluded from the
+   pre-push gate (ouroboros/tools/git.py: _run_pre_push_tests uses -m "not slow").
+   Run with: pytest tests/test_phase7_pipeline.py -v
+"""
+
 Tests:
 - repo_write single-file and multi-file modes
 - repo_write + repo_commit workflow
@@ -22,6 +28,8 @@ import sys
 import tempfile
 
 import pytest
+
+pytestmark = pytest.mark.slow  # Excluded from pre-push gate
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
