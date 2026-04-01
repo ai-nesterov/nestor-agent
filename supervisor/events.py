@@ -68,6 +68,14 @@ _BLOCKED_PATTERNS = (
 _VERIFIER_ACCEPT_PATTERNS = ("verifier_decision: accepted",)
 _VERIFIER_REJECT_PATTERNS = ("verifier_decision: rejected",)
 _VERIFIER_OWNER_PATTERNS = ("verifier_decision: needs_owner_input",)
+_EVOLUTION_REVIEW_FILES = (
+    "supervisor/",
+    "ouroboros/outcome.py",
+    "ouroboros/tools/control.py",
+    "ouroboros/agent.py",
+    "ouroboros/loop.py",
+    "prompts/",
+)
 _PRODUCTIVE_TASK_OUTCOMES = {"executed_work", "scheduled_followup", "committed"}
 _NONPRODUCTIVE_TASK_OUTCOMES = {"report_only", "needs_owner_input", "blocked_external"}
 
@@ -410,6 +418,8 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
 
     if task_kind == "evolution_verify":
         outcome, reason = _classify_evolution_verify_outcome(result_payload, evt)
+        candidate_task_id = str((result_payload or {}).get("candidate_task_id") or "").strip()
+        candidate_payload = load_task_result(ctx.DRIVE_ROOT, candidate_task_id) if candidate_task_id else None
         write_task_result(
             ctx.DRIVE_ROOT,
             str(task_id or ""),
@@ -455,6 +465,27 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
             )
         except Exception:
             log.warning("Failed to append evolution verifier archive entry for task %s", task_id, exc_info=True)
+        if candidate_task_id:
+            write_task_result(
+                ctx.DRIVE_ROOT,
+                candidate_task_id,
+                STATUS_COMPLETED,
+                verifier_outcome=outcome,
+                verifier_reason=reason,
+                verifier_task_id=str(task_id or ""),
+            )
+        if _should_queue_review_for_evolution(verifier_outcome=outcome, candidate_payload=candidate_payload):
+            reason_text = (
+                f"evolution verifier {outcome}: candidate={candidate_task_id or '?'}"
+            )
+            review_task_id = ctx.queue_review_task(reason=reason_text, force=False)
+            if candidate_task_id and review_task_id:
+                write_task_result(
+                    ctx.DRIVE_ROOT,
+                    candidate_task_id,
+                    STATUS_COMPLETED,
+                    review_task_id=review_task_id,
+                )
         return
 
     # Track evolution task success/failure for circuit breaker
@@ -520,7 +551,7 @@ def _handle_task_done(evt: Dict[str, Any], ctx: Any) -> None:
                     "repo_commit_calls": int(execution_facts.get("repo_commit_calls") or 0),
                     "write_ops_total": int(execution_facts.get("write_ops_total") or 0),
                     "tool_errors_total": int(execution_facts.get("tool_errors_total") or 0),
-                    "files_changed": [],
+                    "files_changed": archive_payload.get("changed_files") or [],
                     "tests_run": archive_payload.get("tests_run") or [],
                     "tests_passed": archive_payload.get("tests_passed"),
                     "candidate_sha": archive_payload.get("candidate_sha"),
@@ -918,6 +949,23 @@ def _enqueue_evolution_verifier(
         result=f"Verifier queued for evolution candidate {candidate_task_id}.",
     )
     return verifier_task_id
+
+
+def _should_queue_review_for_evolution(
+    *,
+    verifier_outcome: str,
+    candidate_payload: Dict[str, Any] | None,
+) -> bool:
+    payload = candidate_payload if isinstance(candidate_payload, dict) else {}
+    if verifier_outcome == "rejected":
+        return True
+    changed_files = [str(item).strip() for item in (payload.get("changed_files") or []) if str(item).strip()]
+    if len(changed_files) >= 3:
+        return True
+    return any(
+        any(path.startswith(prefix) for prefix in _EVOLUTION_REVIEW_FILES)
+        for path in changed_files
+    )
 
 
 def _parse_result_ts(raw: Any) -> Optional[float]:

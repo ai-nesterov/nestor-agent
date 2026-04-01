@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List
@@ -29,6 +30,39 @@ def _truncate_with_notice(text: Any, limit: int) -> str:
     if len(raw) <= limit:
         return raw
     return raw[:limit] + f"\n...[truncated from {len(raw)} chars; omitted {len(raw) - limit}]"
+
+
+def _collect_commit_artifact_metadata(env: Any) -> Dict[str, Any]:
+    try:
+        candidate_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=env.repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        parent_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD^"],
+            cwd=env.repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        changed_output = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+            cwd=env.repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
+        return {
+            "candidate_sha": candidate_sha,
+            "parent_sha": parent_sha,
+            "changed_files": changed_files,
+        }
+    except Exception:
+        return {}
 
 
 def build_trace_summary(llm_trace: dict) -> str:
@@ -216,6 +250,9 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             reason="missing_runtime_outcome",
             productive=False,
         )
+        commit_artifacts = {}
+        if str(task.get("type") or "").strip().lower() == "evolution" and str(outcome.get("outcome_class") or "") == "committed":
+            commit_artifacts = _collect_commit_artifact_metadata(env)
         write_task_result(
             env.drive_root,
             str(task.get("id") or ""),
@@ -238,6 +275,9 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             productive=bool(outcome.get("productive")),
             cost_usd=round(float(usage.get("cost") or 0), 6),
             total_rounds=int(usage.get("rounds") or 0),
+            candidate_sha=commit_artifacts.get("candidate_sha"),
+            parent_sha=commit_artifacts.get("parent_sha"),
+            changed_files=commit_artifacts.get("changed_files") or [],
             ts=utc_now_iso(),
         )
     except Exception as e:

@@ -322,6 +322,25 @@ def test_handle_evolution_task_done_queues_verifier_for_committed_candidate(tmp_
     assert payload["verifier_task_id"]
 
 
+def test_should_queue_review_for_rejected_or_meta_level_changes():
+    from supervisor import events as ev_module
+
+    assert ev_module._should_queue_review_for_evolution(
+        verifier_outcome="rejected",
+        candidate_payload={"changed_files": ["docs/readme.md"]},
+    ) is True
+
+    assert ev_module._should_queue_review_for_evolution(
+        verifier_outcome="accepted",
+        candidate_payload={"changed_files": ["supervisor/events.py"]},
+    ) is True
+
+    assert ev_module._should_queue_review_for_evolution(
+        verifier_outcome="accepted",
+        candidate_payload={"changed_files": ["README.md"]},
+    ) is False
+
+
 def test_handle_task_done_revalidates_legacy_blocked_external(tmp_path):
     from ouroboros.task_results import STATUS_COMPLETED, load_task_result, write_task_result
     from supervisor import events as ev_module
