@@ -517,6 +517,8 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
     return (
         f"EVOLUTION #{cycle}\n\n"
         "Autonomous cycle.\n\n"
+        "ROLE:\n"
+        "- evolution_implementer\n\n"
         "OBJECTIVE:\n"
         f"- {description}\n\n"
         "HYPOTHESIS:\n"
@@ -560,6 +562,8 @@ def build_evolution_verify_task_text(
     acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks) or "- The candidate should satisfy its stated acceptance checks.\n"
     return (
         "EVOLUTION VERIFIER\n\n"
+        "ROLE:\n"
+        "- evolution_verifier\n\n"
         f"CANDIDATE TASK ID: {candidate_task_id}\n\n"
         "OBJECTIVE:\n"
         f"- {description}\n"
@@ -718,6 +722,7 @@ def enqueue_evolution_task_if_needed() -> None:
         "text": build_evolution_task_text(cycle, objective=objective),
         "description": str(objective.get("description") or ""),
         "context": str(objective.get("hypothesis") or ""),
+        "agent_role": "evolution_implementer",
         "objective_id": str(objective.get("id") or ""),
         "objective_source": str(objective.get("source") or ""),
         "objective_subsystem": str(objective.get("subsystem") or ""),
