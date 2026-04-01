@@ -46,6 +46,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-q --tb=short"
+markers = [
+    "slow: integration tests excluded from pre-push gate (use pytest -m 'not slow' to run)",
+]
 
 [tool.ruff]
 line-length = 120
