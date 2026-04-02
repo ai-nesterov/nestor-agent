@@ -1096,11 +1096,21 @@ def _enqueue_evolution_implementer_from_plan(
             planner_result,
         ] if part
     )
+    planner_insight = ""
+    if implementer_context.strip():
+        planner_insight = (
+            "\n\nPLANNER ANALYSIS:\n"
+            "The evolution planner has already analyzed this subsystem.\n"
+            "Read the analysis below carefully — it identifies the root cause and proposed fix.\n"
+            "Your job is to IMPLEMENT the plan, not re-diagnose.\n\n"
+            + implementer_context
+        )
+
     task = {
         "id": implementer_task_id,
         "type": "evolution",
         "chat_id": int(owner_chat_id),
-        "text": queue_module.build_evolution_task_text(cycle, objective=objective),
+        "text": queue_module.build_evolution_task_text(cycle, objective=objective) + planner_insight,
         "description": str(planner_payload.get("description") or ""),
         "context": implementer_context,
         "agent_role": "evolution_implementer",

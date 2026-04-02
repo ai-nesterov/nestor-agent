@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.9.0](https://img.shields.io/badge/version-4.9.0-green.svg)](VERSION)
+[![Version 4.9.1](https://img.shields.io/badge/version-4.9.1-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -308,7 +308,7 @@ Full text: [BIBLE.md](BIBLE.md)
 | 3.25.0 | 2026-03-11 | block-wise dialogue memory (`dialogue_blocks.json` replaces monolithic `dialogue_summary.md`, auto-migration, era compression), append-block scratchpad model (`scratchpad_blocks.json`, FIFO rotation, eviction journal), browser state isolation (`_is_infrastructure_error()` structural detection, improved recovery), `send_photo` file_path support (preferred over base64, 10MB limit, MIME detection), shell `ast.literal_eval` fallback for LLM argument recovery, cache hit rate health invariant, patterns.md in background consciousness context, Recipe Capture Rule in SYSTEM.md, knowledge index no-overwrite guard. 4 new test files, all docs synced |
 | 3.24.1 | 2026-03-08 | Post-review fix: restore last_push_succeeded check from push result (was unconditional True — regression from v3.23.1 fix), add repo_write to safety.py CHECKED_TOOLS + whitelist, add repo_write to context.py LARGE_CONTENT_TOOLS, add knowledge_list to CORE_TOOL_NAMES, fix remaining stale index-full references in SYSTEM.md, add pyproject.toml to release invariant wording in SYSTEM.md |
 | 3.24.0 | 2026-03-08 | modern commit pipeline — `repo_write` tool (single/multi-file write without commit), unified pre-commit review gate (3-model parallel review against CHECKLISTS.md, preflight checks, quorum logic, review history, review_rebuttal), `repo_write_commit` kept as legacy compatibility. Operational resilience: remote config failures surfaced at startup and settings save, migrate_remote_credentials wired at startup, auto-rescue only reports committed when git commit actually succeeds. Docs: fix false index-full instruction in SYSTEM.md, DEVELOPMENT.md review protocol updated, ARCHITECTURE.md git tools section rewritten. 47 new behavioral tests |
-| 4.9.0 | 2026-04-02 | External executors enabled by default - Claude Code and Codex now available without env vars in all contexts (evolution, consciousness, review). |
+| 4.9.1 | 2026-04-02 | Evolution planner→implementer handoff: planner analysis is now embedded in implementer task text instead of lost in context. |
 | 4.8.5 | 2026-04-02 | Evolution plan task text: add CONSTRAINTS (no explicit cwd=, time budget), add EXECUTION MODEL (4-phase: diagnose→plan→implement→confirm), remove old "do not modify files" deferral. Fixes SHELL_CWD_ERROR (planner passing data dir as cwd) and TOOL_TIMEOUT (no commit before hard timeout). |
 | 4.8.4 | 2026-04-02 | Auto-rescue: fix README badge 4.8.2>4.8.3, sync ARCHITECTURE.md version header, patch README changelog. No functional code changes. |
 | 4.8.3 | 2026-04-01 | Fix pre-push test gate: timeout raised from 30s to 150s to accommodate full pytest suite runtime. Fix SHELL_CWD_ERROR messages: include `repo_dir` path so LLM always knows the correct working directory. Fix SYSTEM.md repo path to `~/projects/nestor-agent/`. |
