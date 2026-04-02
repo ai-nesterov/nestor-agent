@@ -201,28 +201,18 @@ def collect_objective_candidates(
 
 def _run_quick_test(drive_root: pathlib.Path, timeout_sec: int = 120) -> bool:
     """Return True if tests pass, False if tests fail or error."""
-    import subprocess, threading
-
+    import subprocess
     repo_root = pathlib.Path.home() / "projects" / "nestor-agent"
-    result = {"ok": False}
-
-    def runner():
-        try:
-            proc = subprocess.run(
-                ["python3", "-m", "pytest", "tests/", "-q", "--tb=no", "-x"],
-                cwd=str(repo_root),
-                capture_output=True,
-                timeout=timeout_sec,
-            )
-            result["ok"] = proc.returncode == 0
-        except Exception:
-            result["ok"] = False
-
-    t = threading.Thread(target=runner)
-    t.daemon = True
-    t.start()
-    t.join(timeout=timeout_sec + 5)
-    return result["ok"]
+    try:
+        proc = subprocess.run(
+            ["python3", "-m", "pytest", "tests/", "-q", "--tb=no", "-x"],
+            cwd=str(repo_root),
+            capture_output=True,
+            timeout=timeout_sec,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 def select_next_objective(
