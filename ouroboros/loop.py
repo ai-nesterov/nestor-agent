@@ -237,6 +237,84 @@ def _maybe_inject_self_check(
     return True
 
 
+def _is_evolution_task(messages: List[Dict[str, Any]]) -> bool:
+    """Check if this is an evolution task from the task text in messages."""
+    for msg in messages[:5]:
+        content = str(msg.get("content") or "")
+        if any(tag in content for tag in ("EVOLUTION_PLAN", "EVOLUTION #", "evolution_planner", "evolution_implementer")):
+            return True
+    return False
+
+
+def _maybe_inject_self_check(
+    round_idx: int,
+    max_rounds: int,
+    messages: List[Dict[str, Any]],
+    accumulated_usage: Dict[str, Any],
+    emit_progress: Callable[[str], None],
+) -> bool:
+    """Inject self-check at early (round 5 for evolution) and regular intervals.
+
+    Returns True if a checkpoint was injected (caller boosts reasoning effort).
+    """
+    is_evolution = _is_evolution_task(messages)
+
+    # Early checkpoint for evolution tasks: intervention before the model can spend
+    # 14 rounds doing nothing useful (wait_for_task, get_task_result, git log, etc.)
+    if is_evolution and round_idx == 5:
+        reminder = (
+            "[EARLY CHECKPOINT — round 5/30]\n"
+            "You are an evolution_implementer. Your job:\n"
+            "1. Read ONE file (repo_read)\n"
+            "2. Change ONE thing (repo_write / str_replace_editor)\n"
+            "3. Commit (repo_commit)\n\n"
+            "FAILING RIGHT NOW if you have not yet called repo_read or repo_write.\n"
+            "DIAGNOSTICS (wait_for_task, get_task_result, git log, run_shell for status)\n"
+            "WITHOUT corresponding file changes = FAILING.\n\n"
+            "IMMEDIATE ACTION REQUIRED:\n"
+            "- What file will you read right now?\n"
+            "- What one change will you make?\n"
+            "Answer with a tool call, not words."
+        )
+        messages.append({"role": "system", "content": reminder})
+        emit_progress("🔄 EARLY CHECKPOINT at round 5 (evolution): no file changes detected")
+        return True
+
+    # Regular checkpoint every 15 rounds
+    REMINDER_INTERVAL = 15
+    if round_idx <= 1 or round_idx % REMINDER_INTERVAL != 0:
+        return False
+
+    ctx_tokens = sum(
+        estimate_tokens(str(m.get("content", "")))
+        if isinstance(m.get("content"), str)
+        else sum(estimate_tokens(str(b.get("text", ""))) for b in m.get("content", []) if isinstance(b, dict))
+        for m in messages
+    )
+    task_cost = accumulated_usage.get("cost", 0)
+    checkpoint_num = round_idx // REMINDER_INTERVAL
+
+    reminder = (
+        f"[CHECKPOINT {checkpoint_num} — round {round_idx}/{max_rounds}]\n"
+        f"📊 Context: ~{ctx_tokens} tokens | Cost so far: ${task_cost:.2f} | "
+        f"Rounds remaining: {max_rounds - round_idx}\n\n"
+        f"⏸️ PAUSE AND REFLECT before continuing:\n"
+        f"1. Am I making real progress, or repeating the same actions?\n"
+        f"2. Is my current strategy working? Should I try something different?\n"
+        f"3. Is my context bloated with old tool results I no longer need?\n"
+        f"   → If yes, call `compact_context` to summarize them selectively.\n"
+        f"4. Have I been stuck on the same sub-problem for many rounds?\n"
+        f"   → If yes, consider: simplify the approach, skip the sub-problem, or finish with what you have.\n"
+        f"5. Should I just STOP and return my best result so far?\n"
+        f"6. Multiple REVIEW_BLOCKED results in context? Consider saving WIP\n"
+        f"   (git_diff → data_write) and breaking into smaller commits.\n\n"
+        f"This is not a hard limit — you decide. But be honest with yourself."
+    )
+    messages.append({"role": "system", "content": reminder})
+    emit_progress(f"🔄 Checkpoint {checkpoint_num} at round {round_idx}: ~{ctx_tokens} tokens, ${task_cost:.2f} spent")
+    return True
+
+
 def _setup_dynamic_tools(tools_registry, tool_schemas, messages):
     """
     Wire tool-discovery handlers onto an existing tool_schemas list.
