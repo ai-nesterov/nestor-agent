@@ -539,6 +539,11 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
             "Explain the concrete improvement achieved",
         ]
     acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks)
+    evidence = objective.get("evidence") or {}
+    evidence_lines = (
+        "\nFACTS:\n"
+        + "".join(f"- {str(v)[:300]}\n" for v in evidence.values() if v)
+    ) if evidence else ""
     return (
         f"EVOLUTION #{cycle}\n\n"
         "Autonomous cycle.\n\n"
@@ -551,7 +556,9 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
         "TARGET SUBSYSTEM:\n"
         f"- {subsystem}\n\n"
         "ACCEPTANCE:\n"
-        f"{acceptance_lines}\n"
+        f"{acceptance_lines}"
+        + evidence_lines
+        + "\n"
         "INSTRUCTIONS:\n"
         "1. Read the relevant repository file(s) for the objective\n"
         "2. Make ONE concrete repository change that advances the objective\n"
@@ -561,7 +568,8 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
         "- Second tool call MUST be repo_write, str_replace_editor, or repo_commit\n"
         "- If you call wait_for_task() - you are already failing\n"
         "- If you call run_shell() for diagnostics only - you are already failing\n"
-        "- Progress/status messages without file changes = FAILURE\n\n"
+        "- Progress/status messages without file changes = FAILURE\n"
+        "- Ending with a report/summary and no repo_commit = FAILURE\n\n"
         "TIMING:\n"
         "- You have 3 minutes max. After 3 minutes without a commit, FAIL.\n"
         "- If you can't find anything to improve in 3 minutes, return NEEDS_OWNER_INPUT\n"
@@ -586,6 +594,11 @@ def build_evolution_plan_task_text(
     subsystem = str(objective.get("subsystem") or "runtime").strip()
     acceptance_checks = [str(item).strip() for item in (objective.get("acceptance_checks") or []) if str(item).strip()]
     acceptance_lines = "".join(f"- {item}\n" for item in acceptance_checks) or "- Produce a concrete implementable plan.\n"
+    evidence = objective.get("evidence") or {}
+    evidence_lines = (
+        "\nFACTS:\n"
+        + "".join(f"- {str(v)[:300]}\n" for v in evidence.values() if v)
+    ) if evidence else ""
     return (
         f"EVOLUTION PLAN #{cycle}\n\n"
         "ROLE:\n"
@@ -596,7 +609,9 @@ def build_evolution_plan_task_text(
         + "TARGET SUBSYSTEM:\n"
         f"- {subsystem}\n\n"
         "ACCEPTANCE:\n"
-        f"{acceptance_lines}\n"
+        f"{acceptance_lines}"
+        + evidence_lines
+        + "\n"
         "CONSTRAINTS:\n"
         "- Do NOT use explicit cwd= in run_shell calls. "
         "The repo root is the default working directory. "

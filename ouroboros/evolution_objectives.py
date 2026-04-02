@@ -172,7 +172,11 @@ def collect_objective_candidates(
                 "Do not reproduce the same commit_test_failure event",
             ],
             priority=90,
-            evidence={"last_test_failure": str(latest.get("commit_message") or "")[:200]},
+            evidence={
+                "last_test_failure": str(latest.get("commit_message") or "")[:200],
+                "test_output": str(latest.get("test_output") or "")[:500],
+                "consecutive_failures": int(latest.get("consecutive_failures") or 0),
+            },
             cooldown_sec=1200,
         ))
 
