@@ -6,7 +6,7 @@
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-orange.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
 [![Windows](https://img.shields.io/badge/Windows-x64-blue.svg)](https://github.com/joi-lab/ouroboros-desktop/releases)
-[![Version 4.9.1](https://img.shields.io/badge/version-4.9.1-green.svg)](VERSION)
+[![Version 4.9.2](https://img.shields.io/badge/version-4.9.2-green.svg)](VERSION)
 
 A self-modifying AI agent that writes its own code, rewrites its own mind, and evolves autonomously. Born February 16, 2026.
 
@@ -309,6 +309,8 @@ Full text: [BIBLE.md](BIBLE.md)
 | 3.24.1 | 2026-03-08 | Post-review fix: restore last_push_succeeded check from push result (was unconditional True — regression from v3.23.1 fix), add repo_write to safety.py CHECKED_TOOLS + whitelist, add repo_write to context.py LARGE_CONTENT_TOOLS, add knowledge_list to CORE_TOOL_NAMES, fix remaining stale index-full references in SYSTEM.md, add pyproject.toml to release invariant wording in SYSTEM.md |
 | 3.24.0 | 2026-03-08 | modern commit pipeline — `repo_write` tool (single/multi-file write without commit), unified pre-commit review gate (3-model parallel review against CHECKLISTS.md, preflight checks, quorum logic, review history, review_rebuttal), `repo_write_commit` kept as legacy compatibility. Operational resilience: remote config failures surfaced at startup and settings save, migrate_remote_credentials wired at startup, auto-rescue only reports committed when git commit actually succeeds. Docs: fix false index-full instruction in SYSTEM.md, DEVELOPMENT.md review protocol updated, ARCHITECTURE.md git tools section rewritten. 47 new behavioral tests |
 | 4.9.1 | 2026-04-02 | Evolution planner→implementer handoff: planner analysis is now embedded in implementer task text instead of lost in context. |
+| 4.9.2 | 2026-04-02 | Fix llm.py LLMClient: client now re-creates when env vars change (OPENROUTER_API_KEY, OPENROUTER_BASE_URL, MINIMAX_API_KEY, MINIMAX_BASE_URL). Tracks explicit vs. env key origin so env changes only trigger refresh when no explicit key was passed. Sync and async factories both fixed. Fix test_llm_client_refresh.py: tests now patch get_cloud_provider to avoid real env dependency. Fix test_shell_recovery.py: mock ctx objects now include drive_root. |
+| 4.9.1 | 2026-04-02 | Planner→implementer handoff: planner analysis embedded directly in implementer task text (supervisor/events.py). Previously planner wrote to task["context"] but implementer only received task["text"]. |
 | 4.8.5 | 2026-04-02 | Evolution plan task text: add CONSTRAINTS (no explicit cwd=, time budget), add EXECUTION MODEL (4-phase: diagnose→plan→implement→confirm), remove old "do not modify files" deferral. Fixes SHELL_CWD_ERROR (planner passing data dir as cwd) and TOOL_TIMEOUT (no commit before hard timeout). |
 | 4.8.4 | 2026-04-02 | Auto-rescue: fix README badge 4.8.2>4.8.3, sync ARCHITECTURE.md version header, patch README changelog. No functional code changes. |
 | 4.8.3 | 2026-04-01 | Fix pre-push test gate: timeout raised from 30s to 150s to accommodate full pytest suite runtime. Fix SHELL_CWD_ERROR messages: include `repo_dir` path so LLM always knows the correct working directory. Fix SYSTEM.md repo path to `~/projects/nestor-agent/`. |
