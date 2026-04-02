@@ -212,19 +212,19 @@ def _admission_check_external_executor(
         return None
     if budget_decision == "defer":
         return "budget decision requested deferral"
-    if not _truthy_env("EXTERNAL_EXECUTORS_ENABLED", False):
+    if not _truthy_env("EXTERNAL_EXECUTORS_ENABLED", True):
         return "external executors are disabled"
 
     if executor == "claude_code":
-        if not _truthy_env("CLAUDE_CODE_ENABLED", False):
+        if not _truthy_env("CLAUDE_CODE_ENABLED", True):
             return "claude_code executor is disabled"
-        if caller_class == "consciousness" and not _truthy_env("CLAUDE_ALLOWED_IN_CONSCIOUSNESS", False):
+        if caller_class == "consciousness" and not _truthy_env("CLAUDE_ALLOWED_IN_CONSCIOUSNESS", True):
             return "claude_code is not allowed for consciousness caller"
         if caller_class == "review" and not _truthy_env("CLAUDE_ALLOWED_IN_REVIEW", True):
             return "claude_code is not allowed for review caller"
-        if task_type == "evolution" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", False):
+        if task_type == "evolution" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", True):
             return "claude_code is not allowed in evolution context"
-        if task_kind == "evolution_plan" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", False):
+        if task_kind == "evolution_plan" and not _truthy_env("CLAUDE_ALLOWED_IN_EVOLUTION", True):
             return "claude_code evolution planning is disabled by policy"
         active = sum(
             1
@@ -250,15 +250,15 @@ def _admission_check_external_executor(
         return None
 
     if executor == "codex":
-        if not _truthy_env("CODEX_ENABLED", False):
+        if not _truthy_env("CODEX_ENABLED", True):
             return "codex executor is disabled"
-        if caller_class == "consciousness" and not _truthy_env("CODEX_ALLOWED_IN_CONSCIOUSNESS", False):
+        if caller_class == "consciousness" and not _truthy_env("CODEX_ALLOWED_IN_CONSCIOUSNESS", True):
             return "codex is not allowed for consciousness caller"
         if caller_class == "review" and not _truthy_env("CODEX_ALLOWED_IN_REVIEW", True):
             return "codex is not allowed for review caller"
-        if task_type == "evolution" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", False):
+        if task_type == "evolution" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", True):
             return "codex is not allowed in evolution context"
-        if task_kind == "evolution_plan" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", False):
+        if task_kind == "evolution_plan" and not _truthy_env("CODEX_ALLOWED_IN_EVOLUTION", True):
             return "codex evolution planning is disabled by policy"
         active = sum(
             1
