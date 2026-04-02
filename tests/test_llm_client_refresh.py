@@ -30,7 +30,9 @@ class TestLlmClientRefresh(unittest.TestCase):
 
         fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
         with patch.dict(sys.modules, {"openai": fake_openai}):
-            with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):
+            # Must set LLM_PROVIDER=openrouter so _get_cloud_api_key()
+            # resolves OPENROUTER_API_KEY instead of falling back to MINIMAX_API_KEY.
+            with patch.dict(os.environ, {"LLM_PROVIDER": "openrouter", "OPENROUTER_API_KEY": ""}, clear=False):
                 client = LLMClient()
                 first = client._get_client()
 

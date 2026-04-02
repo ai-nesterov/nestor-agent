@@ -243,6 +243,7 @@ class LLMClient:
         self._provider_override: Optional[str] = str(provider).strip().lower() if provider else None
         initial_provider = self._provider_override or get_cloud_provider()
         self._api_key_override = api_key
+        self._api_key_explicit: bool = api_key is not None  # Track origin for cache invalidation
         if api_key is not None:
             self._api_key = api_key
         else:
@@ -301,12 +302,34 @@ class LLMClient:
         current_api_key = self._get_cloud_api_key(provider)
         current_base_url = self._resolve_cloud_base_url(provider)
 
-        if (
+        # Detect env-only changes by comparing directly against current env.
+        # Only applies when the key originated from env (not explicitly passed).
+        # When explicit, env changes are irrelevant — the explicit key takes precedence.
+        env_openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+        env_openrouter_url = os.environ.get("OPENROUTER_BASE_URL", "")
+        env_minimax_key = os.environ.get("MINIMAX_API_KEY", "")
+        env_minimax_url = os.environ.get("MINIMAX_BASE_URL", "")
+
+        # Only check env freshness when the key is env-derived (not explicit).
+        # With explicit key: _api_key_explicit=True → env checks skipped.
+        # With env key: _api_key_explicit=False → env checks run.
+        env_stale = (
+            not self._api_key_explicit
+            and (
+                self._client_api_key != env_openrouter_key
+                or self._client_base_url != env_openrouter_url
+                or self._client_api_key != env_minimax_key
+                or self._client_base_url != env_minimax_url
+            )
+        )
+        needs_refresh = (
             self._client is None
             or self._client_api_key != current_api_key
             or self._client_base_url != current_base_url
             or self._client_provider != provider
-        ):
+            or env_stale
+        )
+        if needs_refresh:
             from openai import OpenAI
             kwargs: Dict[str, Any] = {
                 "base_url": current_base_url,
@@ -329,11 +352,27 @@ class LLMClient:
         current_api_key = self._get_cloud_api_key(provider)
         current_base_url = self._resolve_cloud_base_url(provider)
 
+        # Detect env-only changes — same logic as sync client.
+        env_openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+        env_openrouter_url = os.environ.get("OPENROUTER_BASE_URL", "")
+        env_minimax_key = os.environ.get("MINIMAX_API_KEY", "")
+        env_minimax_url = os.environ.get("MINIMAX_BASE_URL", "")
+
+        env_stale = (
+            not self._api_key_explicit
+            and (
+                self._async_client_api_key != env_openrouter_key
+                or self._async_client_base_url != env_openrouter_url
+                or self._async_client_api_key != env_minimax_key
+                or self._async_client_base_url != env_minimax_url
+            )
+        )
         if (
             self._async_client is None
             or self._async_client_api_key != current_api_key
             or self._async_client_base_url != current_base_url
             or self._async_client_provider != provider
+            or env_stale
         ):
             from openai import AsyncOpenAI
             kwargs: Dict[str, Any] = {
