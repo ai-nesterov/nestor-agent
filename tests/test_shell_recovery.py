@@ -67,14 +67,14 @@ def test_run_shell_allows_shell_expansion_via_sh_c(tmp_path, monkeypatch):
 
 
 def test_run_shell_rejects_missing_cwd(tmp_path):
-    ctx = SimpleNamespace(repo_dir=tmp_path)
+    ctx = SimpleNamespace(repo_dir=tmp_path, drive_root=tmp_path)
     result = _run_shell(ctx, ["pwd"], cwd="missing-subdir")
     assert "SHELL_CWD_ERROR" in result
     assert "missing-subdir" in result
 
 
 def test_run_shell_rejects_cwd_outside_repo(tmp_path):
-    ctx = SimpleNamespace(repo_dir=tmp_path)
+    ctx = SimpleNamespace(repo_dir=tmp_path, drive_root=tmp_path)
     outside = tmp_path.parent / "outside"
     outside.mkdir(exist_ok=True)
     result = _run_shell(ctx, ["pwd"], cwd="../outside")

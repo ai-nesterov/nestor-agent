@@ -313,15 +313,23 @@ class LLMClient:
         # Only check env freshness when the key is env-derived (not explicit).
         # With explicit key: _api_key_explicit=True → env checks skipped.
         # With env key: _api_key_explicit=False → env checks run.
-        env_stale = (
-            not self._api_key_explicit
-            and (
-                self._client_api_key != env_openrouter_key
-                or self._client_base_url != env_openrouter_url
-                or self._client_api_key != env_minimax_key
-                or self._client_base_url != env_minimax_url
+        # Provider-specific: only compare against the ACTIVE provider's env vars.
+        if provider == "openrouter":
+            env_stale = (
+                not self._api_key_explicit
+                and (
+                    self._client_api_key != env_openrouter_key
+                    or self._client_base_url != env_openrouter_url
+                )
             )
-        )
+        else:  # minimax or other
+            env_stale = (
+                not self._api_key_explicit
+                and (
+                    self._client_api_key != env_minimax_key
+                    or self._client_base_url != env_minimax_url
+                )
+            )
         needs_refresh = (
             self._client is None
             or self._client_api_key != current_api_key
@@ -358,15 +366,23 @@ class LLMClient:
         env_minimax_key = os.environ.get("MINIMAX_API_KEY", "")
         env_minimax_url = os.environ.get("MINIMAX_BASE_URL", "")
 
-        env_stale = (
-            not self._api_key_explicit
-            and (
-                self._async_client_api_key != env_openrouter_key
-                or self._async_client_base_url != env_openrouter_url
-                or self._async_client_api_key != env_minimax_key
-                or self._async_client_base_url != env_minimax_url
+        # Provider-specific: only compare against the ACTIVE provider's env vars.
+        if provider == "openrouter":
+            env_stale = (
+                not self._api_key_explicit
+                and (
+                    self._async_client_api_key != env_openrouter_key
+                    or self._async_client_base_url != env_openrouter_url
+                )
             )
-        )
+        else:  # minimax or other
+            env_stale = (
+                not self._api_key_explicit
+                and (
+                    self._async_client_api_key != env_minimax_key
+                    or self._async_client_base_url != env_minimax_url
+                )
+            )
         if (
             self._async_client is None
             or self._async_client_api_key != current_api_key

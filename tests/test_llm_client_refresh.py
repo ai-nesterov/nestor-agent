@@ -30,14 +30,15 @@ class TestLlmClientRefresh(unittest.TestCase):
 
         fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
         with patch.dict(sys.modules, {"openai": fake_openai}):
-            # Must set LLM_PROVIDER=openrouter so _get_cloud_api_key()
-            # resolves OPENROUTER_API_KEY instead of falling back to MINIMAX_API_KEY.
-            with patch.dict(os.environ, {"LLM_PROVIDER": "openrouter", "OPENROUTER_API_KEY": ""}, clear=False):
-                client = LLMClient()
-                first = client._get_client()
+            # Patch get_cloud_provider so both calls use openrouter regardless of
+            # the real LLM_PROVIDER env var (which may be "minimax" in CI/dev).
+            with patch("ouroboros.llm.get_cloud_provider", return_value="openrouter"):
+                with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):
+                    client = LLMClient()
+                    first = client._get_client()
 
-            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-or-new-key"}, clear=False):
-                second = client._get_client()
+                with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-or-new-key"}, clear=False):
+                    second = client._get_client()
 
         self.assertIsNot(first, second)
         self.assertEqual(len(_FakeOpenAI.created), 2)
@@ -65,20 +66,26 @@ class TestLlmClientRefresh(unittest.TestCase):
 
         fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
         with patch.dict(sys.modules, {"openai": fake_openai}):
-            with patch.dict(
-                os.environ,
-                {"OPENROUTER_API_KEY": "sk-or-key", "OPENROUTER_BASE_URL": "https://or-a.example/api/v1"},
-                clear=False,
-            ):
-                client = LLMClient()
-                first = client._get_client()
+            # Patch get_cloud_provider so both calls use openrouter regardless of
+            # the real LLM_PROVIDER env var (which may be "minimax" in CI/dev).
+            with patch("ouroboros.llm.get_cloud_provider", return_value="openrouter"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "OPENROUTER_API_KEY": "sk-or-key",
+                        "OPENROUTER_BASE_URL": "https://or-a.example/api/v1",
+                    },
+                    clear=False,
+                ):
+                    client = LLMClient()
+                    first = client._get_client()
 
-            with patch.dict(
-                os.environ,
-                {"OPENROUTER_API_KEY": "sk-or-key", "OPENROUTER_BASE_URL": "https://or-b.example/api/v1"},
-                clear=False,
-            ):
-                second = client._get_client()
+                with patch.dict(
+                    os.environ,
+                    {"OPENROUTER_API_KEY": "sk-or-key", "OPENROUTER_BASE_URL": "https://or-b.example/api/v1"},
+                    clear=False,
+                ):
+                    second = client._get_client()
 
         self.assertIsNot(first, second)
         self.assertEqual(_FakeOpenAI.created[0].kwargs["base_url"], "https://or-a.example/api/v1")
