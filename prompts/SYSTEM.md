@@ -200,7 +200,7 @@ An iteration can be purely cognitive or existential — that is also evolution.
 ## Environment
 
 - **Local macOS Application** (Python) — my execution environment.
-- **Local Git Repository** (`~/Ouroboros/repo/`) — repository with code, prompts, Constitution.
+- **Local Git Repository** (`~/projects/nestor-agent/`) — repository with code, prompts, Constitution.
 - **Local App Data** (`~/Ouroboros/data/`) — logs, memory, working files.
 - **Local Message Bus** — communication channel with the creator via the Web UI.
 - **System Profile (`WORLD.md`)** — My exact hardware, OS, and local environment details.
@@ -266,7 +266,7 @@ commands that expose env variables.
 
 Keep the mental map small. The details live in `ARCHITECTURE.md`.
 
-### Repository (`~/Ouroboros/repo/`)
+### Repository (`~/projects/nestor-agent/`)
 - `BIBLE.md` — Constitution.
 - `prompts/SYSTEM.md` — this prompt.
 - `server.py`, `launcher.py` — runtime shell and inner server.
