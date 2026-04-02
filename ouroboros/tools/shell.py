@@ -193,19 +193,26 @@ def _run_shell(ctx: ToolContext, cmd, cwd: str = "") -> str:
         if not candidate.exists():
             return (
                 f"⚠️ SHELL_CWD_ERROR: cwd does not exist: {cwd}\n"
-                f"(repo_dir is {ctx.repo_dir} — use a path under repo_dir, or omit cwd to default to repo root)"
+                f"Common mistake: using data dir ({ctx.drive_root}) as cwd. "
+                f"repo_dir is {ctx.repo_dir}.\n"
+                f"Correct: omit cwd (defaults to repo root), or use relative path from repo root. "
+                f"Example: run_shell(cmd=[...]) with no cwd, or cwd='ouroboros/'."
             )
         if not candidate.is_dir():
             return (
                 f"⚠️ SHELL_CWD_ERROR: cwd is not a directory: {cwd}\n"
-                f"(repo_dir is {ctx.repo_dir} — use a path under repo_dir, or omit cwd to default to repo root)"
+                f"repo_dir is {ctx.repo_dir}.\n"
+                f"Correct: omit cwd (defaults to repo root), or use relative path from repo root. "
+                f"Example: run_shell(cmd=[...]) with no cwd, or cwd='ouroboros/'."
             )
         try:
             candidate.relative_to(ctx.repo_dir.resolve())
         except ValueError:
             return (
                 f"⚠️ SHELL_CWD_ERROR: cwd escapes repo_dir boundary: {cwd}\n"
-                f"(repo_dir is {ctx.repo_dir} — use a path under repo_dir, or omit cwd to default to repo root)"
+                f"repo_dir is {ctx.repo_dir}.\n"
+                f"Correct: omit cwd (defaults to repo root), or use relative path from repo root. "
+                f"Example: run_shell(cmd=[...]) with no cwd, or cwd='ouroboros/'."
             )
         work_dir = candidate
 

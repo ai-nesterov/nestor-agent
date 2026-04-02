@@ -409,7 +409,7 @@ class TestReviewInCommitPipeline:
         """When review blocks, git reset HEAD must be called."""
         git_mod = _get_git_module()
         source = inspect.getsource(git_mod._repo_commit_push)
-        assert 'git", "reset", "HEAD"' in source
+        assert "git, reset, HEAD" in source
 
     def test_review_rebuttal_forwarded(self):
         git_mod = _get_git_module()
