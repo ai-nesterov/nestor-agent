@@ -235,6 +235,7 @@ def run_supervisor(settings: dict, broadcast_ws_sync: Callable[[dict], None]) ->
 
         from supervisor.queue import (
             cancel_task_by_id,
+            enqueue_task,
             enqueue_evolution_task_if_needed,
             enforce_task_timeouts,
             persist_queue_snapshot,
@@ -329,7 +330,7 @@ def run_supervisor(settings: dict, broadcast_ws_sync: Callable[[dict], None]) ->
             save_state=save_state,
             update_budget_from_usage=update_budget_from_usage,
             append_jsonl=append_jsonl,
-            enqueue_task=None,
+            enqueue_task=enqueue_task,
             cancel_task_by_id=cancel_task_by_id,
             queue_review_task=queue_review_task,
             persist_queue_snapshot=persist_queue_snapshot,
