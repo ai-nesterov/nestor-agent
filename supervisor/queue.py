@@ -544,6 +544,19 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
         "\nFACTS:\n"
         + "".join(f"- {str(v)[:300]}\n" for v in evidence.values() if v)
     ) if evidence else ""
+    # Anti-analysis rules: ban verbose reasoning, status messages, and planning loops.
+    anti_analysis = (
+        "ANTI-ANALYSIS RULES (violating any = instant failure):\n"
+        "- Do NOT write status/progress messages. Do NOT describe what you will do.\n"
+        "- Do NOT explain your reasoning. Do NOT narrate your thought process.\n"
+        "- Do NOT call wait_for_task, get_task_result, git log, git diff, or run_shell for diagnostics.\n"
+        "- Do NOT plan before acting. Reading a file IS NOT planning.\n"
+        "- Every round must produce a repo_read, repo_write, str_replace_editor, or repo_commit.\n"
+        "- If you have done nothing in rounds 1-3: repo_read NOW.\n"
+        "- If you have read but not changed anything by round 4: repo_write NOW.\n"
+        "- If you have changes but no commit by round 6: repo_commit NOW.\n"
+        "- Progress/status/thinking messages are not tool calls. They are FAILURE.\n\n"
+    )
     return (
         f"EVOLUTION #{cycle}\n\n"
         "Autonomous cycle.\n\n"
@@ -559,28 +572,23 @@ def build_evolution_task_text(cycle: int, objective: Dict[str, Any] | None = Non
         f"{acceptance_lines}"
         + evidence_lines
         + "\n"
-        "INSTRUCTIONS:\n"
-        "1. Read the relevant repository file(s) for the objective\n"
-        "2. Make ONE concrete repository change that advances the objective\n"
-        "3. Commit the change\n\n"
-        "RULES:\n"
-        "- First tool call MUST be repo_read or str_replace_editor\n"
-        "- Second tool call MUST be repo_write, str_replace_editor, or repo_commit\n"
-        "- If you call wait_for_task() - you are already failing\n"
-        "- If you call run_shell() for diagnostics only - you are already failing\n"
-        "- Progress/status messages without file changes = FAILURE\n"
-        "- Ending with a report/summary and no repo_commit = FAILURE\n\n"
-        "TIMING:\n"
-        "- You have 3 minutes max. After 3 minutes without a commit, FAIL.\n"
-        "- If you can't find anything to improve in 3 minutes, return NEEDS_OWNER_INPUT\n"
-        "  with ONE specific question. \"I don't know what to do\" = FAILURE.\n\n"
+        + anti_analysis
+        + "INSTRUCTIONS:\n"
+        "1. Read ONE repository file relevant to the objective (repo_read)\n"
+        "2. Make ONE concrete change (repo_write or str_replace_editor)\n"
+        "3. Commit (repo_commit)\n\n"
+        "MANDATORY SEQUENCE:\n"
+        "- Round 1-2: repo_read of target file. No other tool counts.\n"
+        "- Round 3-4: repo_write/str_replace_editor on that file. No other tool counts.\n"
+        "- Round 5+: repo_commit. No other tool counts.\n"
+        "Deviating from this sequence = FAILURE.\n\n"
         "SUCCESS CRITERIA:\n"
-        "- Modified files exist (repo_write/str_replace_editor)\n"
-        "- Git commit created via repo_commit\n"
+        "- repo_write or str_replace_editor called (file modified)\n"
+        "- repo_commit called (git commit created)\n"
         "- Nothing else counts as success.\n\n"
-        "FAILURE OUTCOMES (use when stuck):\n"
+        "FAILURE OUTCOMES:\n"
         "- FAILED: something broke, can't complete\n"
-        "- NEEDS_OWNER_INPUT: specific question only (not \"what should I do\")\n"
+        "- NEEDS_OWNER_INPUT: ONE specific question only\n"
     )
 
 
