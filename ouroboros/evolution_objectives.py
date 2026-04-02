@@ -199,6 +199,32 @@ def collect_objective_candidates(
     return sorted(candidates, key=lambda item: (-int(item.get("priority") or 0), str(item.get("description") or "")))
 
 
+def _run_quick_test(drive_root: pathlib.Path, timeout_sec: int = 120) -> bool:
+    """Return True if tests pass, False if tests fail or error."""
+    import subprocess, threading
+
+    repo_root = pathlib.Path.home() / "projects" / "nestor-agent"
+    result = {"ok": False}
+
+    def runner():
+        try:
+            proc = subprocess.run(
+                ["python3", "-m", "pytest", "tests/", "-q", "--tb=no", "-x"],
+                cwd=str(repo_root),
+                capture_output=True,
+                timeout=timeout_sec,
+            )
+            result["ok"] = proc.returncode == 0
+        except Exception:
+            result["ok"] = False
+
+    t = threading.Thread(target=runner)
+    t.daemon = True
+    t.start()
+    t.join(timeout=timeout_sec + 5)
+    return result["ok"]
+
+
 def select_next_objective(
     drive_root: Any,
     *,
@@ -222,6 +248,14 @@ def select_next_objective(
         cooldown_sec = int(candidate.get("cooldown_sec") or 0)
         if cooldown_sec > 0 and last_ts > 0 and (now - last_ts) < cooldown_sec:
             continue
+
+        # Stale-evidence guard: verify test_gate failures are real before returning
+        subsystem = str(candidate.get("subsystem") or "").strip().lower()
+        if subsystem == "test_gate":
+            root = pathlib.Path(drive_root)
+            if _run_quick_test(root):
+                continue  # tests pass — skip stale test_gate objective
+
         return candidate
 
     return None

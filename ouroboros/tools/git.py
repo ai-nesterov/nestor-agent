@@ -55,32 +55,32 @@ def _auto_tag_on_version_bump(repo_dir: pathlib.Path, commit_message: str) -> st
         return ""
 
 
-def create_git_tag(tag_name: str, message: str, commit_sha: Optional[str] = None) -> str:
+def create_git_tag(name: str, message: str, commit_sha: Optional[str] = None) -> str:
     """
     Create an annotated git tag.
-    
+
     Args:
-        tag_name: Tag name (e.g., "v4.7.0")
+        name: Tag name (e.g., "v4.7.0")
         message: Tag message/description
         commit_sha: Optional commit SHA to tag (defaults to HEAD)
-    
+
     Returns:
         Success message or error description
     """
     from ouroboros.config import REPO_DIR
-    
-    if not tag_name:
-        return "Error: tag_name is required"
-    
+
+    if not name:
+        return "Error: name is required"
+
     try:
-        cmd = ["git", "tag", "-a", tag_name, "-m", message]
+        cmd = ["git", "tag", "-a", name, "-m", message]
         if commit_sha:
             cmd.append(commit_sha)
         run_cmd(cmd, cwd=REPO_DIR)
-        return f"Created tag {tag_name}"
+        return f"Created tag {name}"
     except Exception as e:
         if "already exists" in str(e):
-            return f"Tag {tag_name} already exists"
+            return f"Tag {name} already exists"
         return f"Failed to create tag: {e}"
 
 
@@ -952,10 +952,10 @@ def get_tools() -> List[ToolEntry]:
             "name": "create_git_tag",
             "description": "Create an annotated git tag. Use for version releases.",
             "parameters": {"type": "object", "properties": {
-                "tag_name": {"type": "string", "description": "Tag name (e.g., 'v4.7.0')"},
+                "name": {"type": "string", "description": "Tag name (e.g., 'v4.7.0')"},
                 "message": {"type": "string", "description": "Tag message/description"},
                 "commit_sha": {"type": "string", "description": "Optional commit SHA to tag (defaults to HEAD)"},
-            }, "required": ["tag_name", "message"]},
+            }, "required": ["name", "message"]},
         }, create_git_tag, is_code_tool=True),
         ToolEntry("delete_git_tag", {
             "name": "delete_git_tag",
