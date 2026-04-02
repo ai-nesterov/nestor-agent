@@ -253,25 +253,55 @@ def derive_outcome_constraints_from_facts(
             "default_reason": "empty_final_text",
         }
 
-    if normalized_task_type == "evolution" and (_requests_owner_direction(text) or impact in {"low", "medium"}):
-        default_outcome = OUTCOME_NEEDS_OWNER_INPUT if _requests_owner_direction(text) else OUTCOME_FAILED
-        default_reason = "agent_requested_owner_direction" if _requests_owner_direction(text) else "evolution_semantic_adjudication_required"
-        return {
-            "forced_outcome": "",
-            "reason": "evolution_semantic_adjudication_required",
-            "allowed_outcomes": {
-                OUTCOME_EXECUTED_WORK,
-                OUTCOME_SCHEDULED_FOLLOWUP,
-                OUTCOME_NEEDS_OWNER_INPUT,
-                OUTCOME_REPORT_ONLY,
-                OUTCOME_FAILED,
-            },
-            "semantic_adjudication": True,
-            "default_outcome": default_outcome,
-            "default_reason": default_reason,
-        }
+    # Evolution tasks: report_only is never acceptable.
+    # Any actual repo mutation = EXECUTED_WORK. Low-impact only (scratchpad/identity) = FAILED.
+    if normalized_task_type == "evolution":
+        if impact == "high":
+            pass  # already caught above: forced OUTCOME_EXECUTED_WORK
+        elif _requests_owner_direction(text):
+            return {
+                "forced_outcome": OUTCOME_NEEDS_OWNER_INPUT,
+                "reason": "agent_requested_owner_direction",
+                "allowed_outcomes": {OUTCOME_NEEDS_OWNER_INPUT},
+                "semantic_adjudication": False,
+                "default_outcome": OUTCOME_NEEDS_OWNER_INPUT,
+                "default_reason": "agent_requested_owner_direction",
+            }
+        elif impact in {"low", "medium"}:
+            # Deterministic: no report_only. Low-only mutations (scratchpad, identity)
+            # without repo changes = FAILED. Repo mutations = EXECUTED_WORK.
+            tools = _normalized_mutating_tools(facts)
+            repo_mutations = tools - {"knowledge_write", "update_scratchpad", "update_identity"}
+            if repo_mutations:
+                return {
+                    "forced_outcome": OUTCOME_EXECUTED_WORK,
+                    "reason": "evolution_repo_mutation_detected",
+                    "allowed_outcomes": {OUTCOME_EXECUTED_WORK},
+                    "semantic_adjudication": False,
+                    "default_outcome": OUTCOME_EXECUTED_WORK,
+                    "default_reason": "evolution_repo_mutation_detected",
+                }
+            else:
+                return {
+                    "forced_outcome": OUTCOME_FAILED,
+                    "reason": "evolution_knowledge_only_write_insufficient",
+                    "allowed_outcomes": {OUTCOME_FAILED},
+                    "semantic_adjudication": False,
+                    "default_outcome": OUTCOME_FAILED,
+                    "default_reason": "evolution_knowledge_only_write_insufficient",
+                }
 
     if int(facts.get("tool_calls_total") or 0) == 0:
+        # Evolution with zero tool calls = deterministic FAILED. No report_only.
+        if normalized_task_type == "evolution":
+            return {
+                "forced_outcome": OUTCOME_FAILED,
+                "reason": "evolution_zero_tool_calls",
+                "allowed_outcomes": {OUTCOME_FAILED},
+                "semantic_adjudication": False,
+                "default_outcome": OUTCOME_FAILED,
+                "default_reason": "evolution_zero_tool_calls",
+            }
         allowed = {
             OUTCOME_NEEDS_OWNER_INPUT,
             OUTCOME_REPORT_ONLY,
