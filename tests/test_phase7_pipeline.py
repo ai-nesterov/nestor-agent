@@ -6,18 +6,16 @@
    Run with: pytest tests/test_phase7_pipeline.py -v
 """
 
-Tests:
-- repo_write single-file and multi-file modes
-- repo_write + repo_commit workflow
-- Unified pre-commit review gate (preflight, parse, quorum)
-- Blocked review leaves files on disk but unstaged
-- review_rebuttal parameter
-- configure_remote failure surfacing
-- migrate_remote_credentials no-op on clean origin
-- Auto-rescue only reports committed when commit actually happened
-- repo_write in CORE_TOOL_NAMES
-- Review history building
-"""
+# Tests covered:
+# - repo_write single-file and multi-file modes
+# - repo_write + repo_commit workflow
+# - Unified pre-commit review gate (preflight, parse, quorum)
+# - Blocked review leaves files on disk but unstaged
+# - review_rebuttal parameter
+# - configure_remote failure surfacing
+# - migrate_remote_credentials no-op on clean origin
+# - Auto-rescue only reports committed when commit actually happened
+# - Review history building
 import importlib
 import inspect
 import json
